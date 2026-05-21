@@ -1,6 +1,7 @@
 import time
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from core.database import Database
+from core.limiter import Limiter
 from core.logger import setup_logger
 
 logger = setup_logger('core.monitor')
@@ -16,6 +17,7 @@ class ActivityMonitor(QObject):
     def __init__(self, db: Database, parent=None):
         super().__init__(parent)
         self.db = db
+        self.limiter = Limiter()
         self._running = False
         self._current_app = None
         self._current_title = ""
@@ -98,3 +100,5 @@ class ActivityMonitor(QObject):
                 self._last_notified[app_name] = now
                 logger.warning(f'Лимит {limit_minutes} мин превышен для {app_name} ({total_minutes} мин)')
                 self.limit_reached.emit(app_name, limit_minutes)
+            # Принудительное закрытие при превышении лимита
+            self.limiter.enforce_limit(app_name, limit_minutes, total_minutes)

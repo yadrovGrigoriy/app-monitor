@@ -43,6 +43,11 @@ class Database:
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
+                CREATE TABLE IF NOT EXISTS admins (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_activity_date ON activity(date);
                 CREATE INDEX IF NOT EXISTS idx_activity_app ON activity(app_name);
             """)
@@ -179,5 +184,37 @@ class Database:
             conn.execute('DELETE FROM activity WHERE date = ?', (today,))
             conn.commit()
             logger.info(f'Активность за {today} сброшена')
+        finally:
+            conn.close()
+
+    # ─── Администраторы ────────────────────────────────────────────
+
+    def add_admin(self, username: str, password_hash: str):
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                'INSERT OR IGNORE INTO admins (username, password_hash) VALUES (?, ?)',
+                (username, password_hash)
+            )
+            conn.commit()
+            logger.debug(f'Администратор добавлен: {username}')
+        finally:
+            conn.close()
+
+    def get_admin(self, username: str) -> dict | None:
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                'SELECT * FROM admins WHERE username = ?', (username,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def admin_exists(self) -> bool:
+        conn = self._get_connection()
+        try:
+            row = conn.execute('SELECT 1 FROM admins LIMIT 1').fetchone()
+            return row is not None
         finally:
             conn.close()

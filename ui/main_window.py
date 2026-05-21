@@ -1,13 +1,12 @@
-from PyQt5.QtWidgets import (
-    QMainWindow, QSystemTrayIcon, QMenu, QAction,
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
-    QTableWidgetItem, QHeaderView, QPushButton, QLabel,
-    QApplication
-)
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFont
+import datetime
+from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QApplication
+from PyQt5.QtCore import Qt, QTimer, QDate
+from PyQt5.QtGui import QPalette, QColor
 from core.database import Database
-from core.notifier import Notifier
+from ui.date_toolbar import DateToolbar
+from ui.activity_table import ActivityTable
+from ui.bottom_bar import BottomBar
+from ui.tray_manager import TrayManager
 from ui.settings_dialog import SettingsDialog
 from core.logger import setup_logger
 
@@ -20,7 +19,6 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.notifier = Notifier()
         logger.debug('MainWindow __init__')
         self._init_ui()
         self._init_tray()
@@ -28,59 +26,38 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         logger.debug('Инициализация UI')
-        self.setWindowTitle('Монитор активности')
-        self.setMinimumSize(600, 400)
+        self.setWindowTitle('Монитор активности приложений')
+        self.setMinimumSize(720, 500)
+        self.resize(900, 600)
+
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        title = QLabel('Активность приложений за сегодня')
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
-        self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(['Приложение', 'Время', 'Лимит'])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        layout.addWidget(self.table)
-        btn_layout = QHBoxLayout()
-        btn_settings = QPushButton('Настройки')
-        btn_settings.clicked.connect(self._open_settings)
-        btn_layout.addWidget(btn_settings)
-        btn_refresh = QPushButton('Обновить')
-        btn_refresh.clicked.connect(self._refresh_table)
-        btn_layout.addWidget(btn_refresh)
-        btn_quit = QPushButton('Выйти')
-        btn_quit.clicked.connect(QApplication.instance().quit)
-        btn_layout.addWidget(btn_quit)
-        layout.addLayout(btn_layout)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
+
+        # Панель даты
+        self.date_toolbar = DateToolbar()
+        self.date_toolbar.date_changed.connect(self._on_date_changed)
+        layout.addWidget(self.date_toolbar)
+
+        # Таблица
+        self.table = ActivityTable()
+        layout.addWidget(self.table, stretch=1)
+
+        # Нижняя панель
+        self.bottom_bar = BottomBar()
+        self.bottom_bar.settings_clicked.connect(self._open_settings)
+        self.bottom_bar.refresh_clicked.connect(self._refresh_table)
+        layout.addWidget(self.bottom_bar)
+
         logger.debug('UI инициализирован')
 
     def _init_tray(self):
         logger.debug('Инициализация трей-иконки')
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
-        self.tray_icon.setToolTip('AppMonitor')
-        tray_menu = QMenu()
-        show_action = QAction('Показать', self)
-        show_action.triggered.connect(self.show_and_raise)
-        tray_menu.addAction(show_action)
-        settings_action = QAction('Настройки', self)
-        settings_action.triggered.connect(self._open_settings)
-        tray_menu.addAction(settings_action)
-        tray_menu.addSeparator()
-        quit_action = QAction('Выйти', self)
-        quit_action.triggered.connect(QApplication.instance().quit)
-        tray_menu.addAction(quit_action)
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.activated.connect(self._on_tray_activated)
-        self.tray_icon.show()
-        self.notifier = Notifier(self.tray_icon)
+        self.tray = TrayManager(self)
+        self.tray.show_requested.connect(self.show_and_raise)
+        self.tray.settings_requested.connect(self._open_settings)
         logger.debug('Трей-иконка создана')
 
     def _init_timer(self):
@@ -94,30 +71,35 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
-    def _on_tray_activated(self, reason):
-        logger.debug(f'Трей-иконка активирована: reason={reason}')
-        if reason == QSystemTrayIcon.DoubleClick:
-            self.show_and_raise()
+    def _on_date_changed(self, qdate: QDate):
+        self._refresh_table()
+
+    def _get_activity_for_date(self, date_iso: str) -> list:
+        conn = self.db._get_connection()
+        try:
+            rows = conn.execute(
+                'SELECT * FROM activity WHERE date = ? ORDER BY duration_seconds DESC',
+                (date_iso,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
 
     def _refresh_table(self):
-        activity = self.db.get_today_activity()
+        qdate = self.date_toolbar.selected_date()
+        date_iso = qdate.toString(Qt.ISODate)
+        is_today = (date_iso == datetime.date.today().isoformat())
+
+        if is_today:
+            activity = self.db.get_today_activity()
+        else:
+            activity = self._get_activity_for_date(date_iso)
+
         limits = {l['app_name']: l for l in self.db.get_all_limits()}
-        logger.debug(f'Обновление таблицы: {len(activity)} приложений')
-        self.table.setRowCount(len(activity))
-        for i, item in enumerate(activity):
-            self.table.setItem(i, 0, QTableWidgetItem(item['app_name']))
-            hours = item['duration_seconds'] // 3600
-            minutes = (item['duration_seconds'] % 3600) // 60
-            time_str = f'{hours} ч {minutes:02d} мин'
-            self.table.setItem(i, 1, QTableWidgetItem(time_str))
-            limit = limits.get(item['app_name'])
-            if limit and limit['enabled']:
-                limit_str = f'{limit["limit_minutes"]} мин'
-                if item['duration_seconds'] // 60 >= limit['limit_minutes']:
-                    limit_str += ' (!)'
-            else:
-                limit_str = 'нет'
-            self.table.setItem(i, 2, QTableWidgetItem(limit_str))
+        logger.debug(f'Обновление таблицы: {len(activity)} приложений за {date_iso}')
+
+        self.date_toolbar.set_apps_count(len(activity))
+        self.table.populate(activity, limits)
 
     def _open_settings(self):
         logger.info('Открытие окна настроек')
@@ -128,9 +110,17 @@ class MainWindow(QMainWindow):
 
     def show_limit_notification(self, app_name: str, limit_minutes: int):
         logger.warning(f'Лимит превышен: {app_name} > {limit_minutes} мин')
-        self.notifier.show_limit_notification(app_name, limit_minutes)
+        if self.tray.notifier:
+            self.tray.notifier.show_limit_notification(app_name, limit_minutes)
 
     def closeEvent(self, event):
-        logger.info('Окно закрыто (свёрнуто в трей)')
+        logger.info('Попытка закрытия окна — сворачивание в трей')
         event.ignore()
         self.hide()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_F4 and event.modifiers() & Qt.AltModifier:
+            logger.debug('Alt+F4 заблокирован — сворачивание в трей')
+            self.hide()
+            return
+        super().keyPressEvent(event)

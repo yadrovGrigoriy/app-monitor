@@ -25,3 +25,13 @@ class StatusResponse(BaseModel):
     status: str = "ok"
     uptime_seconds: int = 0
     monitored_apps: int = 0
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str

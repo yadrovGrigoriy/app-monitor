@@ -8,6 +8,7 @@ from core.autostart import AutostartManager
 from core.scheduler import DailyScheduler
 from api.server import AppMonitorAPI
 from core.logger import setup_logger
+from core.self_protect import init_self_protection, setup_watchdog
 
 logger = setup_logger('main')
 
@@ -30,6 +31,10 @@ def main():
             os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugins_path
             logger.debug(f'QT plugins path: {plugins_path}')
 
+    # Самозащита монитора от завершения
+    init_self_protection()
+    setup_watchdog()
+
     app = QApplication(sys.argv)
     app.setApplicationName('AppMonitor')
     app.setApplicationDisplayName('Монитор активности приложений')
@@ -39,9 +44,9 @@ def main():
     db = Database()
     logger.info('База данных инициализирована')
 
-    # Запуск API-сервера для удалённого доступа
-    api_server = AppMonitorAPI(db, host=API_HOST, port=API_PORT)
-    api_server.start()
+    # Запуск API-сервера для удалённого доступа (отключён)
+    # api_server = AppMonitorAPI(db, host=API_HOST, port=API_PORT)
+    # api_server.start()
 
     autostart = AutostartManager()
     if autostart.is_autostart_enabled():
