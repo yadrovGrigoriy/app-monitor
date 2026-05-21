@@ -27,3 +27,12 @@ Thumbs.db
 
 # Logs
 logs/
+
+# Generator scripts (not part of the project)
+add_*.py
+gen*.py
+deploy*.py
+save_base.py
+write_db.py
+project_files.json
+generate.py
