@@ -1,11 +1,14 @@
-import threading
+import os, json
+base = "C:/Users/Григорий/code/AppMonitor"
+json_path = os.path.join(base, "project_files.json")
+with open(json_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+data["core/scheduler.py"] = """import threading
 import time
 import schedule
 from core.database import Database
 from core.reporter import EmailReporter
-from core.logger import setup_logger
-
-logger = setup_logger('core.scheduler')
 
 
 class DailyScheduler:
@@ -14,32 +17,29 @@ class DailyScheduler:
         self.reporter = EmailReporter(db)
         self._running = False
         self._thread = None
-        logger.debug('DailyScheduler создан')
 
     def start(self):
         if self._running:
-            logger.warning('Планировщик уже запущен')
             return
         self._running = True
         schedule.every().day.at('00:05').do(self._daily_reset_and_report)
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        logger.info('Планировщик запущен (ежедневный сброс в 00:05)')
 
     def stop(self):
         self._running = False
-        logger.info('Планировщик остановлен')
 
     def _run_loop(self):
-        logger.debug('Поток планировщика запущен')
         while self._running:
             schedule.run_pending()
             time.sleep(30)
-        logger.debug('Поток планировщика завершён')
 
     def _daily_reset_and_report(self):
-        logger.info('Ежедневный сброс активности')
         if self.reporter.is_configured():
-            logger.info('Отправка ежедневного отчёта')
             self.reporter.send_daily_report()
         self.db.reset_today()
+"""
+
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False)
+print("OK")

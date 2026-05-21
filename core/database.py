@@ -1,6 +1,9 @@
 import sqlite3
 import os
 import datetime
+from core.logger import setup_logger
+
+logger = setup_logger('core.database')
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'app_monitor.db')
 
@@ -9,6 +12,7 @@ class Database:
     def __init__(self, db_path: str = DB_PATH):
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
+        logger.info(f'База данных: {db_path}')
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -43,6 +47,9 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_activity_app ON activity(app_name);
             """)
             conn.commit()
+            logger.debug('Таблицы БД инициализированы')
+        except Exception as e:
+            logger.error(f'Ошибка инициализации БД: {e}')
         finally:
             conn.close()
 
@@ -56,6 +63,7 @@ class Database:
                 (duration_seconds, datetime.datetime.now().isoformat(), app_name, today)
             )
             conn.commit()
+            logger.debug(f'Активность обновлена: {app_name} +{duration_seconds}с')
         finally:
             conn.close()
 
@@ -80,6 +88,7 @@ class Database:
                 (app_name, window_title, today, datetime.datetime.now().isoformat())
             )
             conn.commit()
+            logger.debug(f'Новая запись активности: {app_name}')
             row = conn.execute(
                 'SELECT * FROM activity WHERE app_name = ? AND date = ?',
                 (app_name, today)
@@ -127,6 +136,7 @@ class Database:
                 (app_name, limit_minutes, int(enabled), limit_minutes, int(enabled))
             )
             conn.commit()
+            logger.debug(f'Лимит сохранён: {app_name} = {limit_minutes} мин (enabled={enabled})')
         finally:
             conn.close()
 
@@ -135,6 +145,7 @@ class Database:
         try:
             conn.execute('DELETE FROM limits WHERE app_name = ?', (app_name,))
             conn.commit()
+            logger.debug(f'Лимит удалён: {app_name}')
         finally:
             conn.close()
 
@@ -157,6 +168,7 @@ class Database:
                 (key, value, value)
             )
             conn.commit()
+            logger.debug(f'Настройка сохранена: {key} = {value}')
         finally:
             conn.close()
 
@@ -166,5 +178,6 @@ class Database:
         try:
             conn.execute('DELETE FROM activity WHERE date = ?', (today,))
             conn.commit()
+            logger.info(f'Активность за {today} сброшена')
         finally:
             conn.close()

@@ -1,9 +1,13 @@
-import time
+import os, json
+base = "C:/Users/Григорий/code/AppMonitor"
+json_path = os.path.join(base, "project_files.json")
+with open(json_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+# monitor.py
+data["core/monitor.py"] = """import time
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from core.database import Database
-from core.logger import setup_logger
-
-logger = setup_logger('core.monitor')
 
 
 class ActivityMonitor(QObject):
@@ -21,15 +25,13 @@ class ActivityMonitor(QObject):
         self._current_title = ""
         self._elapsed_seconds = 0
         self._last_notified = {}
-        logger.debug('ActivityMonitor создан')
 
     def _get_active_window_info(self):
         try:
             import win32gui
             import win32process
             import psutil
-        except ImportError as e:
-            logger.error(f'Ошибка импорта win32/psutil: {e}')
+        except ImportError:
             return None
         try:
             hwnd = win32gui.GetForegroundWindow()
@@ -40,25 +42,21 @@ class ActivityMonitor(QObject):
             process = psutil.Process(pid)
             app_name = process.name()
             return app_name, window_title
-        except Exception as e:
-            logger.debug(f'Ошибка получения окна: {e}')
+        except Exception:
             return None
 
     def start(self):
         if self._running:
-            logger.warning('Монитор уже запущен')
             return
         self._running = True
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(self.POLL_INTERVAL_MS)
-        logger.info('Монитор активности запущен')
 
     def stop(self):
         self._running = False
         if hasattr(self, "_timer"):
             self._timer.stop()
-        logger.info('Монитор активности остановлен')
 
     def _tick(self):
         info = self._get_active_window_info()
@@ -71,7 +69,6 @@ class ActivityMonitor(QObject):
             self._elapsed_seconds += 1
         else:
             if self._current_app and self._elapsed_seconds >= self.SAVE_INTERVAL_SEC:
-                logger.debug(f'Смена приложения: {self._current_app} -> {app_name} ({self._elapsed_seconds} сек)')
                 self.db.update_activity(self._current_app, self._elapsed_seconds)
                 self.activity_updated.emit(self._current_app, 0)
             self._current_app = app_name
@@ -96,5 +93,9 @@ class ActivityMonitor(QObject):
             last_notified = self._last_notified.get(app_name, 0)
             if now - last_notified >= 300:
                 self._last_notified[app_name] = now
-                logger.warning(f'Лимит {limit_minutes} мин превышен для {app_name} ({total_minutes} мин)')
                 self.limit_reached.emit(app_name, limit_minutes)
+"""
+
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False)
+print("OK")

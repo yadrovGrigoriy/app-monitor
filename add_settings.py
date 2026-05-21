@@ -1,4 +1,10 @@
-from PyQt5.QtWidgets import (
+import os, json
+base = "C:/Users/Григорий/code/AppMonitor"
+json_path = os.path.join(base, "project_files.json")
+with open(json_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+data["ui/settings_dialog.py"] = """from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
     QWidget, QLabel, QLineEdit, QSpinBox, QCheckBox,
     QPushButton, QTableWidget, QTableWidgetItem,
@@ -7,9 +13,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from core.database import Database
 from core.autostart import AutostartManager
-from core.logger import setup_logger
-
-logger = setup_logger('ui.settings')
 
 
 class SettingsDialog(QDialog):
@@ -17,7 +20,6 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.db = db
         self.autostart = AutostartManager()
-        logger.debug('SettingsDialog __init__')
         self._init_ui()
         self._load_settings()
 
@@ -113,25 +115,20 @@ class SettingsDialog(QDialog):
     def _add_limit(self):
         app_name, ok = QInputDialog.getText(self, 'Новый лимит', 'Введите имя приложения (например, chrome.exe):')
         if ok and app_name:
-            logger.info(f'Добавлен лимит: {app_name.strip()}')
             self.db.set_limit(app_name.strip(), 60, True)
             self._refresh_limits_table()
 
     def _delete_limit(self, app_name: str):
-        logger.info(f'Удалён лимит: {app_name}')
         self.db.delete_limit(app_name)
         self._refresh_limits_table()
 
     def _on_autostart_changed(self, state):
         if state == Qt.Checked:
-            logger.info('Автозагрузка включена через настройки')
             self.autostart.enable()
         else:
-            logger.info('Автозагрузка отключена через настройки')
             self.autostart.disable()
 
     def _save_settings(self):
-        logger.info('Сохранение настроек')
         self.db.set_setting('email_from', self.email_from.text())
         self.db.set_setting('email_password', self.email_password.text())
         self.db.set_setting('email_to', self.email_to.text())
@@ -144,5 +141,9 @@ class SettingsDialog(QDialog):
             check = self.limits_table.cellWidget(i, 2)
             if spin and check:
                 self.db.set_limit(app_name, spin.value(), check.isChecked())
-        logger.debug('Настройки сохранены')
         self.accept()
+"""
+
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False)
+print("OK")

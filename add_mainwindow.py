@@ -1,4 +1,10 @@
-from PyQt5.QtWidgets import (
+import os, json
+base = "C:/Users/Григорий/code/AppMonitor"
+json_path = os.path.join(base, "project_files.json")
+with open(json_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+data["ui/main_window.py"] = """from PyQt5.QtWidgets import (
     QMainWindow, QSystemTrayIcon, QMenu, QAction,
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
     QTableWidgetItem, QHeaderView, QPushButton, QLabel,
@@ -9,9 +15,6 @@ from PyQt5.QtGui import QFont
 from core.database import Database
 from core.notifier import Notifier
 from ui.settings_dialog import SettingsDialog
-from core.logger import setup_logger
-
-logger = setup_logger('ui.main_window')
 
 
 class MainWindow(QMainWindow):
@@ -21,13 +24,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = db
         self.notifier = Notifier()
-        logger.debug('MainWindow __init__')
         self._init_ui()
         self._init_tray()
         self._init_timer()
 
     def _init_ui(self):
-        logger.debug('Инициализация UI')
         self.setWindowTitle('Монитор активности')
         self.setMinimumSize(600, 400)
         central = QWidget()
@@ -59,10 +60,8 @@ class MainWindow(QMainWindow):
         btn_quit.clicked.connect(QApplication.instance().quit)
         btn_layout.addWidget(btn_quit)
         layout.addLayout(btn_layout)
-        logger.debug('UI инициализирован')
 
     def _init_tray(self):
-        logger.debug('Инициализация трей-иконки')
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
         self.tray_icon.setToolTip('AppMonitor')
@@ -81,7 +80,6 @@ class MainWindow(QMainWindow):
         self.tray_icon.activated.connect(self._on_tray_activated)
         self.tray_icon.show()
         self.notifier = Notifier(self.tray_icon)
-        logger.debug('Трей-иконка создана')
 
     def _init_timer(self):
         self._timer = QTimer(self)
@@ -89,20 +87,17 @@ class MainWindow(QMainWindow):
         self._timer.start(self.UPDATE_INTERVAL_MS)
 
     def show_and_raise(self):
-        logger.info('Показать окно (из трея)')
         self.show()
         self.raise_()
         self.activateWindow()
 
     def _on_tray_activated(self, reason):
-        logger.debug(f'Трей-иконка активирована: reason={reason}')
         if reason == QSystemTrayIcon.DoubleClick:
             self.show_and_raise()
 
     def _refresh_table(self):
         activity = self.db.get_today_activity()
         limits = {l['app_name']: l for l in self.db.get_all_limits()}
-        logger.debug(f'Обновление таблицы: {len(activity)} приложений')
         self.table.setRowCount(len(activity))
         for i, item in enumerate(activity):
             self.table.setItem(i, 0, QTableWidgetItem(item['app_name']))
@@ -120,17 +115,18 @@ class MainWindow(QMainWindow):
             self.table.setItem(i, 2, QTableWidgetItem(limit_str))
 
     def _open_settings(self):
-        logger.info('Открытие окна настроек')
         dialog = SettingsDialog(self.db, self)
         dialog.exec_()
-        logger.info('Окно настроек закрыто')
         self._refresh_table()
 
     def show_limit_notification(self, app_name: str, limit_minutes: int):
-        logger.warning(f'Лимит превышен: {app_name} > {limit_minutes} мин')
         self.notifier.show_limit_notification(app_name, limit_minutes)
 
     def closeEvent(self, event):
-        logger.info('Окно закрыто (свёрнуто в трей)')
         event.ignore()
         self.hide()
+"""
+
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False)
+print("OK")
