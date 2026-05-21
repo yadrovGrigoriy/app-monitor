@@ -23,12 +23,12 @@ class ActivityMonitor(QObject):
         self._last_notified = {}
         self._excluded_cache: set[str] = set()
         self._excluded_cache_time = 0
-        logger.debug('ActivityMonitor создан')
+        logger.debug('ActivityMonitor created')
 
     def _get_app_name(self, process, window_title: str) -> tuple[str, str]:
-        """Вернуть (display_name, system_id).
-        display_name — читаемое имя для отображения.
-        system_id — имя процесса (process.name()), используется для проверки исключений.
+        """Return (display_name, system_id).
+        display_name — human-readable name for display.
+        system_id — process name (process.name()), used for exclusion checks.
         """
         system_id = process.name().lower()
         display_name = system_id
@@ -45,11 +45,9 @@ class ActivityMonitor(QObject):
         except Exception:
             pass
 
-        # Fallback: если процесс python.exe, берём название из заголовка окна
-        # Срабатывает только если FileDescription не дал читаемого имени
+        # Fallback: if process is python.exe, try to extract IDE name from window title
+        # Only triggers if FileDescription didn't return a readable name
         if system_id in ('python.exe', 'pythonw.exe'):
-            # Fallback срабатывает, только если FileDescription не дал нормального имени
-            # (display_name всё ещё равен system_id или содержит путь)
             need_fallback = (
                 display_name == system_id
                 or '\\' in display_name or '/' in display_name
@@ -88,13 +86,13 @@ class ActivityMonitor(QObject):
         return display_name, system_id
 
     def _get_active_window_info(self):
-        """Вернуть список (app_name, window_title) для всех открытых окон."""
+        """Return list of (app_name, window_title) for all open windows."""
         try:
             import win32gui
             import win32process
             import psutil
         except ImportError as e:
-            logger.error(f'Ошибка импорта win32/psutil: {e}')
+            logger.error(f'Failed to import win32/psutil: {e}')
             return []
 
         windows = []
@@ -123,8 +121,9 @@ class ActivityMonitor(QObject):
         return windows
 
     def _is_excluded(self, system_id: str) -> bool:
-        """Проверить, исключено ли приложение из отслеживания.
-        Кеширует список исключений на 30 секунд."""
+        """Check if app is excluded from tracking.
+        Caches exclusion list for 30 seconds.
+        """
         import time
         now = time.time()
         if now - self._excluded_cache_time > 30:
@@ -132,30 +131,29 @@ class ActivityMonitor(QObject):
         return system_id in self._excluded_cache
 
     def _refresh_excluded_cache(self):
-        """Принудительно обновить кеш исключений."""
+        """Force refresh the exclusion cache."""
         import time
         self._excluded_cache = {e['system_id'].lower() for e in self.db.get_excluded_apps()}
         self._excluded_cache_time = time.time()
 
     def start(self):
         if self._running:
-            logger.warning('Монитор уже запущен')
+            logger.warning('Monitor already running')
             return
         self._running = True
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(self.POLL_INTERVAL_MS)
-        logger.info('Монитор активности запущен')
+        logger.info('Activity monitor started')
 
     def stop(self):
         self._running = False
         if hasattr(self, "_timer"):
             self._timer.stop()
-        logger.info('Монитор активности остановлен')
+        logger.info('Activity monitor stopped')
 
     def _tick(self):
-        logger.debug('_tick вызван')
-        # Получаем активное (foreground) окно
+        logger.debug('_tick called')
         try:
             import win32gui
             import win32process
@@ -165,31 +163,30 @@ class ActivityMonitor(QObject):
             _, fg_pid = win32process.GetWindowThreadProcessId(fg_hwnd)
             fg_process = psutil.Process(fg_pid)
             fg_app_name, fg_system_id = self._get_app_name(fg_process, fg_title)
-            logger.debug(f'Активное окно: hwnd={fg_hwnd} title="{fg_title}" pid={fg_pid} app={fg_app_name} sys={fg_system_id}')
+            logger.debug(f'Active window: hwnd={fg_hwnd} title="{fg_title}" pid={fg_pid} app={fg_app_name} sys={fg_system_id}')
             if self._is_excluded(fg_system_id):
-                logger.debug(f'{fg_system_id} в исключениях, пропускаем')
+                logger.debug(f'{fg_system_id} is excluded, skipping')
                 fg_app_name = None
         except Exception as e:
-            logger.error(f'Ошибка получения активного окна: {e}')
+            logger.error(f'Failed to get active window: {e}')
             fg_app_name = None
             fg_title = ''
 
         if not fg_app_name:
-            logger.debug('fg_app_name = None, выходим')
+            logger.debug('fg_app_name is None, exiting')
             return
 
-        # Сохраняем +1с в БД и сразу обновляем UI — одним соединением
+        # Save +1s to DB and update UI — single connection
         self.db.tick_activity(fg_app_name, fg_title, fg_system_id)
         self.activity_updated.emit(fg_system_id, 0)
 
-        # Проверяем лимиты раз в 10 секунд
+        # Check limits every 10 seconds
         now = time.time()
         if now - self._last_notified.get('_last_limit_check', 0) >= 10:
             self._last_notified['_last_limit_check'] = now
             self._check_limits(fg_system_id)
 
-        # Отладка
-        logger.debug(f'ТИК: sys={fg_system_id}')
+        logger.debug(f'TICK: sys={fg_system_id}')
 
     def _check_limits(self, system_id: str):
         limit = self.db.get_limit_by_system_id(system_id)
@@ -204,5 +201,5 @@ class ActivityMonitor(QObject):
             last_notified = self._last_notified.get(system_id, 0)
             if now - last_notified >= 300:
                 self._last_notified[system_id] = now
-                logger.warning(f'Лимит {limit_minutes} мин превышен для {system_id} ({total_minutes} мин)')
+                logger.warning(f'Limit {limit_minutes} min exceeded for {system_id} ({total_minutes} min)')
                 self.limit_reached.emit(system_id, limit_minutes)
