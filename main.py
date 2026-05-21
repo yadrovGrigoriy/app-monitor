@@ -6,9 +6,13 @@ from core.database import Database
 from core.monitor import ActivityMonitor
 from core.autostart import AutostartManager
 from core.scheduler import DailyScheduler
+from api.server import AppMonitorAPI
 from core.logger import setup_logger
 
 logger = setup_logger('main')
+
+API_HOST = '0.0.0.0'
+API_PORT = 8765
 
 
 def main():
@@ -34,6 +38,10 @@ def main():
 
     db = Database()
     logger.info('База данных инициализирована')
+
+    # Запуск API-сервера для удалённого доступа
+    api_server = AppMonitorAPI(db, host=API_HOST, port=API_PORT)
+    api_server.start()
 
     autostart = AutostartManager()
     if autostart.is_autostart_enabled():
