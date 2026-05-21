@@ -10,10 +10,8 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 import httpx
 
-from core.logger import setup_logger
 
-logger = setup_logger('client')
-
+# ─── HTTP-клиент ─────────────────────────────────────────────────────
 
 class ApiClient:
     """HTTP-клиент для общения с сервером AppMonitor."""
@@ -22,31 +20,19 @@ class ApiClient:
         self.base_url = base_url.rstrip("/")
 
     def _get(self, path: str):
-        try:
-            r = httpx.get(f"{self.base_url}{path}", timeout=5)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            logger.error(f"GET {path}: {e}")
-            raise
+        r = httpx.get(f"{self.base_url}{path}", timeout=5)
+        r.raise_for_status()
+        return r.json()
 
     def _post(self, path: str, data: dict):
-        try:
-            r = httpx.post(f"{self.base_url}{path}", json=data, timeout=5)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            logger.error(f"POST {path}: {e}")
-            raise
+        r = httpx.post(f"{self.base_url}{path}", json=data, timeout=5)
+        r.raise_for_status()
+        return r.json()
 
     def _delete(self, path: str):
-        try:
-            r = httpx.delete(f"{self.base_url}{path}", timeout=5)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            logger.error(f"DELETE {path}: {e}")
-            raise
+        r = httpx.delete(f"{self.base_url}{path}", timeout=5)
+        r.raise_for_status()
+        return r.json()
 
     def get_status(self) -> dict:
         return self._get("/api/status")
@@ -76,6 +62,8 @@ class ApiClient:
     def set_setting(self, key: str, value: str):
         return self._post("/api/settings", {"key": key, "value": value})
 
+
+# ─── Главное окно ────────────────────────────────────────────────────
 
 class ClientWindow(QMainWindow):
     UPDATE_INTERVAL_MS = 5000
@@ -151,15 +139,15 @@ class ClientWindow(QMainWindow):
         self.api = ApiClient(address)
         try:
             status = self.api.get_status()
-            self.status_label.setText(f"Подключён (аптайм: {status['uptime_seconds']}с, приложений: {status['monitored_apps']})")
+            self.status_label.setText(
+                f"Подключён (аптайм: {status['uptime_seconds']}с, приложений: {status['monitored_apps']})"
+            )
             self.status_label.setStyleSheet("color: green;")
-            logger.info(f"Подключено к {address}")
             self._refresh()
         except Exception as e:
             self.status_label.setText(f"Ошибка: {e}")
             self.status_label.setStyleSheet("color: red;")
             self.api = None
-            logger.error(f"Не удалось подключиться к {address}: {e}")
 
     def _refresh(self):
         if not self.api:
@@ -194,6 +182,8 @@ class ClientWindow(QMainWindow):
         dialog.exec_()
         self._refresh()
 
+
+# ─── Диалог настроек ─────────────────────────────────────────────────
 
 class ClientSettingsDialog(QWidget):
     def __init__(self, api: ApiClient, parent=None):
@@ -314,6 +304,8 @@ class ClientSettingsDialog(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Ошибка", str(e))
 
+
+# ─── Точка входа ─────────────────────────────────────────────────────
 
 def main():
     app = QApplication(sys.argv)
