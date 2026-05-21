@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+
+# IDE
+.idea/
+*.iml
+
+# Database
+data/*.db
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Veai
+.veai/
