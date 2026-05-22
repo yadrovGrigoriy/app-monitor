@@ -24,9 +24,9 @@ def setup_logger(name: str) -> logging.Logger:
         file_handler.setFormatter(file_fmt)
         logger.addHandler(file_handler)
 
-        # Консольный handler — только INFO и выше
+        # Консольный handler — DEBUG и выше
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.DEBUG)
         console_fmt = logging.Formatter(
             '%(asctime)s | %(message)s',
             datefmt='%H:%M:%S'

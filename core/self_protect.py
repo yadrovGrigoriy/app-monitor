@@ -155,32 +155,6 @@ def is_process_protected(pid: int) -> bool:
         return False
 
 
-def setup_watchdog():
-    """
-    Запустить watchdog, который перезапускает монитор в случае падения.
-    Возвращает True, если watchdog запущен.
-    """
-    try:
-        import subprocess
-        import atexit
-
-        script = os.path.abspath(sys.argv[0])
-        python = sys.executable
-
-        def _restart():
-            """Перезапустить монитор при штатном завершении."""
-            logger.info("Watchdog: перезапуск монитора...")
-            subprocess.Popen([python, script], creationflags=subprocess.DETACHED_PROCESS)
-
-        atexit.register(_restart)
-        logger.info("Watchdog активирован (перезапуск при завершении)")
-        return True
-
-    except Exception as e:
-        logger.error(f"Ошибка запуска watchdog: {e}")
-        return False
-
-
 def init_self_protection():
     """Инициализировать все механизмы самозащиты."""
     logger.info("Инициализация самозащиты монитора...")

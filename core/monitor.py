@@ -1,4 +1,5 @@
 import time
+import datetime
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from core.database import Database
 from core.limiter import Limiter
@@ -12,39 +13,129 @@ class ActivityMonitor(QObject):
     limit_reached = pyqtSignal(str, int)
 
     POLL_INTERVAL_MS = 1000
-    SAVE_INTERVAL_SEC = 5
+    SAVE_INTERVAL_SEC = 10
 
     def __init__(self, db: Database, parent=None):
         super().__init__(parent)
         self.db = db
         self.limiter = Limiter()
         self._running = False
-        self._current_app = None
-        self._current_title = ""
-        self._elapsed_seconds = 0
         self._last_notified = {}
+        self._excluded_cache: set[str] = set()
+        self._excluded_cache_time = 0
         logger.debug('ActivityMonitor создан')
 
+    def _get_app_name(self, process, window_title: str) -> tuple[str, str]:
+        """Вернуть (display_name, system_id).
+        display_name — читаемое имя для отображения.
+        system_id — имя процесса (process.name()), используется для проверки исключений.
+        """
+        system_id = process.name().lower()
+        display_name = system_id
+
+        try:
+            import win32api
+            exe_path = process.exe()
+            lang, codepage = win32api.GetFileVersionInfo(exe_path, '\\VarFileInfo\\Translation')[0]
+            file_desc = win32api.GetFileVersionInfo(
+                exe_path, f'\\StringFileInfo\\{lang:04X}{codepage:04X}\\FileDescription'
+            )
+            if file_desc:
+                display_name = file_desc
+        except Exception:
+            pass
+
+        # Fallback: если процесс python.exe, берём название из заголовка окна
+        # Срабатывает только если FileDescription не дал читаемого имени
+        if system_id in ('python.exe', 'pythonw.exe'):
+            # Fallback срабатывает, только если FileDescription не дал нормального имени
+            # (display_name всё ещё равен system_id или содержит путь)
+            need_fallback = (
+                display_name == system_id
+                or '\\' in display_name or '/' in display_name
+            )
+            if need_fallback:
+                if window_title:
+                    for kw in ('PyCharm', 'IntelliJ', 'CLion', 'WebStorm', 'PhpStorm',
+                               'GoLand', 'Rider', 'DataGrip', 'RubyMine', 'AppCode',
+                               'VS Code', 'Code', 'Sublime Text', 'Notepad++', 'Vim',
+                               'Neovim', 'Emacs', 'Terminal', 'cmd', 'PowerShell',
+                               'Windows PowerShell', 'MINGW', 'Git Bash', 'WSL',
+                               'Jupyter', 'JupyterLab', 'Spyder', 'RStudio',
+                               'MATLAB', 'Mathematica', 'Maple',
+                               'Qt Designer', 'Qt Creator', 'Android Studio',
+                               'Xcode', 'Visual Studio', 'VSCodium'):
+                        if kw.lower() in window_title.lower():
+                            return kw, system_id
+                    for sep in (' — ', ' - ', ' – ', ' — ', ' | ', ' :: '):
+                        if sep in window_title:
+                            parts = window_title.split(sep, 1)
+                            second = parts[1].strip()
+                            for kw in ('PyCharm', 'IntelliJ', 'CLion', 'WebStorm',
+                                       'PhpStorm', 'GoLand', 'Rider', 'DataGrip',
+                                       'RubyMine', 'AppCode', 'VS Code', 'Code',
+                                       'Sublime Text', 'Notepad++', 'Vim', 'Neovim',
+                                       'Emacs', 'Terminal', 'cmd', 'PowerShell',
+                                       'Windows PowerShell', 'MINGW', 'Git Bash',
+                                       'WSL', 'Jupyter', 'JupyterLab', 'Spyder',
+                                       'RStudio', 'MATLAB', 'Mathematica', 'Maple',
+                                       'Qt Designer', 'Qt Creator', 'Android Studio',
+                                       'Xcode', 'Visual Studio', 'VSCodium'):
+                                if kw.lower() in second.lower():
+                                    return kw, system_id
+                            return parts[0].strip(), system_id
+                return 'Python', system_id
+        return display_name, system_id
+
     def _get_active_window_info(self):
+        """Вернуть список (app_name, window_title) для всех открытых окон."""
         try:
             import win32gui
             import win32process
             import psutil
         except ImportError as e:
             logger.error(f'Ошибка импорта win32/psutil: {e}')
-            return None
-        try:
-            hwnd = win32gui.GetForegroundWindow()
-            if not hwnd:
-                return None
+            return []
+
+        windows = []
+        seen_pids = set()
+
+        def _enum_callback(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
             window_title = win32gui.GetWindowText(hwnd)
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            process = psutil.Process(pid)
-            app_name = process.name()
-            return app_name, window_title
-        except Exception as e:
-            logger.debug(f'Ошибка получения окна: {e}')
-            return None
+            if not window_title:
+                return
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                if pid in seen_pids:
+                    return
+                seen_pids.add(pid)
+                process = psutil.Process(pid)
+                display_name, system_id = self._get_app_name(process, window_title)
+                if self._is_excluded(system_id):
+                    return
+                windows.append((display_name, system_id, window_title))
+            except Exception:
+                pass
+
+        win32gui.EnumWindows(_enum_callback, None)
+        return windows
+
+    def _is_excluded(self, system_id: str) -> bool:
+        """Проверить, исключено ли приложение из отслеживания.
+        Кеширует список исключений на 30 секунд."""
+        import time
+        now = time.time()
+        if now - self._excluded_cache_time > 30:
+            self._refresh_excluded_cache()
+        return system_id in self._excluded_cache
+
+    def _refresh_excluded_cache(self):
+        """Принудительно обновить кеш исключений."""
+        import time
+        self._excluded_cache = {e['system_id'].lower() for e in self.db.get_excluded_apps()}
+        self._excluded_cache_time = time.time()
 
     def start(self):
         if self._running:
@@ -63,42 +154,55 @@ class ActivityMonitor(QObject):
         logger.info('Монитор активности остановлен')
 
     def _tick(self):
-        info = self._get_active_window_info()
-        if info is None:
-            return
-        app_name, window_title = info
-        if not app_name or app_name.lower() in ("", "explorer.exe", "applicationframehost.exe"):
-            return
-        if app_name == self._current_app:
-            self._elapsed_seconds += 1
-        else:
-            if self._current_app and self._elapsed_seconds >= self.SAVE_INTERVAL_SEC:
-                logger.debug(f'Смена приложения: {self._current_app} -> {app_name} ({self._elapsed_seconds} сек)')
-                self.db.update_activity(self._current_app, self._elapsed_seconds)
-                self.activity_updated.emit(self._current_app, 0)
-            self._current_app = app_name
-            self._current_title = window_title
-            self._elapsed_seconds = 0
-            self.db.get_or_create_today_activity(app_name, window_title)
-        if self._elapsed_seconds >= self.SAVE_INTERVAL_SEC:
-            self.db.update_activity(self._current_app, self.SAVE_INTERVAL_SEC)
-            self._elapsed_seconds = 0
-            self.activity_updated.emit(self._current_app, 0)
-            self._check_limits(app_name)
+        logger.debug('_tick вызван')
+        # Получаем активное (foreground) окно
+        try:
+            import win32gui
+            import win32process
+            import psutil
+            fg_hwnd = win32gui.GetForegroundWindow()
+            fg_title = win32gui.GetWindowText(fg_hwnd)
+            _, fg_pid = win32process.GetWindowThreadProcessId(fg_hwnd)
+            fg_process = psutil.Process(fg_pid)
+            fg_app_name, fg_system_id = self._get_app_name(fg_process, fg_title)
+            logger.debug(f'Активное окно: hwnd={fg_hwnd} title="{fg_title}" pid={fg_pid} app={fg_app_name} sys={fg_system_id}')
+            if self._is_excluded(fg_system_id):
+                logger.debug(f'{fg_system_id} в исключениях, пропускаем')
+                fg_app_name = None
+        except Exception as e:
+            logger.error(f'Ошибка получения активного окна: {e}')
+            fg_app_name = None
+            fg_title = ''
 
-    def _check_limits(self, app_name: str):
-        limit = self.db.get_limit(app_name)
+        if not fg_app_name:
+            logger.debug('fg_app_name = None, выходим')
+            return
+
+        # Сохраняем +1с в БД и сразу обновляем UI — одним соединением
+        self.db.tick_activity(fg_app_name, fg_title, fg_system_id)
+        self.activity_updated.emit(fg_system_id, 0)
+
+        # Проверяем лимиты раз в 10 секунд
+        now = time.time()
+        if now - self._last_notified.get('_last_limit_check', 0) >= 10:
+            self._last_notified['_last_limit_check'] = now
+            self._check_limits(fg_system_id)
+
+        # Отладка
+        logger.debug(f'ТИК: sys={fg_system_id}')
+
+    def _check_limits(self, system_id: str):
+        limit = self.db.get_limit_by_system_id(system_id)
         if not limit or not limit["enabled"]:
             return
-        today_activity = self.db.get_or_create_today_activity(app_name)
-        total_minutes = today_activity["duration_seconds"] // 60
+        db_row = self.db.get_or_create_today_activity_by_system_id(system_id)
+        db_duration = db_row["duration_seconds"] if db_row else 0
+        total_minutes = db_duration // 60
         limit_minutes = limit["limit_minutes"]
         if total_minutes >= limit_minutes:
             now = time.time()
-            last_notified = self._last_notified.get(app_name, 0)
+            last_notified = self._last_notified.get(system_id, 0)
             if now - last_notified >= 300:
-                self._last_notified[app_name] = now
-                logger.warning(f'Лимит {limit_minutes} мин превышен для {app_name} ({total_minutes} мин)')
-                self.limit_reached.emit(app_name, limit_minutes)
-            # Принудительное закрытие при превышении лимита
-            self.limiter.enforce_limit(app_name, limit_minutes, total_minutes)
+                self._last_notified[system_id] = now
+                logger.warning(f'Лимит {limit_minutes} мин превышен для {system_id} ({total_minutes} мин)')
+                self.limit_reached.emit(system_id, limit_minutes)
