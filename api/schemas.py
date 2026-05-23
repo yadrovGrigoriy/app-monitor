@@ -56,3 +56,13 @@ class PeriodRequest(BaseModel):
 class StatsResponse(BaseModel):
     total_seconds: int = 0
     apps: list[ActivityItem] = []
+
+
+class UpdateCheckResponse(BaseModel):
+    """Ответ на запрос проверки обновления."""
+    latest_version: str = ""
+    current_version: str = ""
+    has_update: bool = False
+    download_url: str = ""
+    release_notes: str = ""
+    file_size: int = 0

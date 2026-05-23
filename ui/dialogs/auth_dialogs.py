@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from ui.styles import global_style, COLOR_DANGER
-from ui.breadcrumbs import breadcrumb_title, component_tooltip
+
 
 
 class AuthDialog(QDialog):
@@ -15,8 +15,7 @@ class AuthDialog(QDialog):
 
     def __init__(self, parent=None, attempt: int = 0):
         super().__init__(parent)
-        self.setWindowTitle(breadcrumb_title('Вход'))
-        self.setToolTip(component_tooltip(self))
+        self.setWindowTitle('Вход')
         # self.setFixedSize(240, 180)
         self.setStyleSheet(global_style())
         layout = QVBoxLayout(self)
@@ -51,8 +50,7 @@ class RegisterDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(breadcrumb_title('Регистрация'))
-        self.setToolTip(component_tooltip(self))
+        self.setWindowTitle('Регистрация')
         self.setFixedSize(400, 300)
         self.setStyleSheet(global_style())
         layout = QVBoxLayout(self)

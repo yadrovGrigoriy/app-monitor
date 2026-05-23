@@ -1,13 +1,14 @@
 import asyncio
 import datetime
 import json
+import os
 import threading
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.database import Database
@@ -16,8 +17,14 @@ from core.logger import setup_logger
 from api.schemas import (
     ActivityItem, LimitItem, SettingItem, StatusResponse,
     LoginRequest, LoginResponse, AppItem, TrackedRequest,
-    PeriodRequest, StatsResponse,
+    PeriodRequest, StatsResponse, UpdateCheckResponse,
 )
+
+# mDNS-объявление сервиса для автообнаружения в локальной сети
+_MDNS_SERVICE_TYPE = "_appmonitor._tcp.local."
+_MDNS_SERVICE_NAME = None  # будет задан при запуске
+_mdns_thread: Optional[threading.Thread] = None
+_mdns_server = None
 
 logger = setup_logger('api.server')
 
@@ -25,11 +32,14 @@ logger = setup_logger('api.server')
 class AppMonitorAPI:
     """FastAPI-сервер для удалённого доступа к данным AppMonitor."""
 
-    def __init__(self, db: Database, host: str = "0.0.0.0", port: int = 8765):
+    def __init__(self, db: Database, host: str = "0.0.0.0", port: int = 8765,
+                 ssl_certfile: Optional[str] = None, ssl_keyfile: Optional[str] = None):
         self.db = db
         self.auth = AuthManager(db)
         self.host = host
         self.port = port
+        self.ssl_certfile = ssl_certfile
+        self.ssl_keyfile = ssl_keyfile
         self._start_time: Optional[float] = None
         self._server: Optional[uvicorn.Server] = None
         self._thread: Optional[threading.Thread] = None
@@ -128,13 +138,13 @@ class AppMonitorAPI:
             return limit
 
         @app.post("/api/limits", response_model=LimitItem)
-        async def set_limit(limit: LimitItem, authorization: str = ""):
+        async def set_limit(limit: LimitItem, authorization: str = Header("")):
             _require_auth(authorization)
             self.db.set_limit(limit.system_id, limit.limit_minutes, limit.enabled, app_name=limit.app_name)
             return limit
 
         @app.delete("/api/limits/{system_id}")
-        async def delete_limit(system_id: str, authorization: str = ""):
+        async def delete_limit(system_id: str, authorization: str = Header("")):
             _require_auth(authorization)
             self.db.delete_limit_by_system_id(system_id)
             return {"status": "deleted", "system_id": system_id}
@@ -145,7 +155,7 @@ class AppMonitorAPI:
             return SettingItem(key=key, value=value)
 
         @app.post("/api/settings", response_model=SettingItem)
-        async def set_setting(setting: SettingItem, authorization: str = ""):
+        async def set_setting(setting: SettingItem, authorization: str = Header("")):
             _require_auth(authorization)
             self.db.set_setting(setting.key, setting.value)
             return setting
@@ -169,7 +179,7 @@ class AppMonitorAPI:
             return self.db.get_tracked_apps()
 
         @app.post("/api/apps/tracked", response_model=dict)
-        async def set_tracked(req: TrackedRequest, authorization: str = ""):
+        async def set_tracked(req: TrackedRequest, authorization: str = Header("")):
             _require_auth(authorization)
             if req.tracked:
                 self.db.mark_as_tracked(req.system_id)
@@ -204,13 +214,13 @@ class AppMonitorAPI:
             return self.db.get_excluded_apps()
 
         @app.post("/api/excluded", response_model=dict)
-        async def add_excluded(req: TrackedRequest, authorization: str = ""):
+        async def add_excluded(req: TrackedRequest, authorization: str = Header("")):
             _require_auth(authorization)
             self.db.add_excluded_app(req.system_id)
             return {"status": "ok", "system_id": req.system_id}
 
         @app.delete("/api/excluded/{system_id}")
-        async def remove_excluded(system_id: str, authorization: str = ""):
+        async def remove_excluded(system_id: str, authorization: str = Header("")):
             _require_auth(authorization)
             self.db.remove_excluded_app(system_id)
             return {"status": "deleted", "system_id": system_id}
@@ -266,11 +276,72 @@ class AppMonitorAPI:
             except Exception as e:
                 logger.error(f"WebSocket ошибка: {e}")
 
+        # ─── Обновления ────────────────────────────────────────────
+        @app.get("/api/update/check", response_model=UpdateCheckResponse)
+        async def check_update():
+            """Проверить наличие обновления на сервере."""
+            from core.updater import APP_VERSION, is_newer_version
+
+            # Путь к установщику рядом с сервером
+            installer_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
+            installer_pattern = f"AppMonitor_Setup_*.exe"
+            import glob
+            installers = sorted(glob.glob(os.path.join(installer_dir, installer_pattern)))
+
+            latest_version = APP_VERSION
+            download_url = ""
+            file_size = 0
+
+            if installers:
+                # Берём последний установщик, извлекаем версию из имени
+                latest_installer = installers[-1]
+                file_size = os.path.getsize(latest_installer)
+                fname = os.path.basename(latest_installer)
+                # AppMonitor_Setup_1.1.0.exe -> 1.1.0
+                version_part = fname.replace("AppMonitor_Setup_", "").replace(".exe", "")
+                if version_part:
+                    latest_version = version_part
+                download_url = f"/api/update/download/{latest_version}"
+
+            has_update = is_newer_version(APP_VERSION, latest_version)
+
+            return UpdateCheckResponse(
+                latest_version=latest_version,
+                current_version=APP_VERSION,
+                has_update=has_update,
+                download_url=download_url,
+                release_notes=f"Доступна версия {latest_version}",
+                file_size=file_size,
+            )
+
+        @app.get("/api/update/download/{version}")
+        async def download_update(version: str):
+            """Скачать установщик указанной версии."""
+            from fastapi.responses import FileResponse
+            from fastapi import HTTPException
+
+            installer_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
+            installer_path = os.path.join(installer_dir, f"AppMonitor_Setup_{version}.exe")
+
+            if not os.path.isfile(installer_path):
+                raise HTTPException(status_code=404, detail=f"Установщик версии {version} не найден")
+
+            return FileResponse(
+                path=installer_path,
+                filename=f"AppMonitor_Setup_{version}.exe",
+                media_type="application/x-msdownload",
+            )
+
     def start(self):
         """Запускает FastAPI-сервер в фоновом потоке."""
         if self._thread and self._thread.is_alive():
             logger.warning("API сервер уже запущен")
             return
+
+        ssl_kwargs = {}
+        if self.ssl_certfile and self.ssl_keyfile:
+            ssl_kwargs["ssl_certfile"] = self.ssl_certfile
+            ssl_kwargs["ssl_keyfile"] = self.ssl_keyfile
 
         config = uvicorn.Config(
             self.app,
@@ -278,6 +349,8 @@ class AppMonitorAPI:
             port=self.port,
             log_level="warning",
             access_log=False,
+            log_config=None,
+            **ssl_kwargs,
         )
         self._server = uvicorn.Server(config)
 
@@ -290,8 +363,74 @@ class AppMonitorAPI:
         self._thread.start()
         logger.info(f"API сервер запущен: http://{self.host}:{self.port}")
 
+        # Регистрируем mDNS-сервис для автообнаружения
+        _start_mdns_service(self.port)
+
     def stop(self):
         """Останавливает сервер."""
+        _stop_mdns_service()
         if self._server:
             self._server.should_exit = True
             logger.info("API сервер остановлен")
+
+
+# ─── mDNS-объявление сервиса ────────────────────────────────────────
+
+
+def _start_mdns_service(port: int):
+    """Запустить mDNS-сервис для автообнаружения в локальной сети."""
+    global _mdns_thread, _mdns_server, _MDNS_SERVICE_NAME
+    try:
+        from zeroconf import Zeroconf, ServiceInfo
+        import socket
+
+        hostname = socket.gethostname()
+        _MDNS_SERVICE_NAME = f"AppMonitor-{hostname}.{_MDNS_SERVICE_TYPE}"
+
+        local_ip = _get_local_ip()
+        if not local_ip:
+            logger.warning("Не удалось определить локальный IP, mDNS не запущен")
+            return
+
+        info = ServiceInfo(
+            type_=_MDNS_SERVICE_TYPE,
+            name=_MDNS_SERVICE_NAME,
+            addresses=[socket.inet_aton(local_ip)],
+            port=port,
+            properties={"hostname": hostname, "version": "1.0"},
+        )
+
+        zeroconf = Zeroconf()
+        zeroconf.register_service(info)
+        _mdns_server = zeroconf
+        logger.info(f"mDNS сервис зарегистрирован: {_MDNS_SERVICE_NAME} -> {local_ip}:{port}")
+    except ImportError:
+        logger.debug("zeroconf не установлен, mDNS недоступен")
+    except Exception as e:
+        logger.warning(f"Ошибка регистрации mDNS: {e}")
+
+
+def _stop_mdns_service():
+    """Остановить mDNS-сервис."""
+    global _mdns_server
+    if _mdns_server:
+        try:
+            _mdns_server.unregister_all_services()
+            _mdns_server.close()
+        except Exception as e:
+            logger.warning(f"Ошибка остановки mDNS: {e}")
+        _mdns_server = None
+
+
+def _get_local_ip() -> Optional[str]:
+    """Получить локальный IP-адрес (не 127.0.0.1)."""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.1)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return None

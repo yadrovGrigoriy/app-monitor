@@ -450,20 +450,28 @@ class TestMainWindowDB(unittest.TestCase):
     def test_on_open_double_click(self):
         """Двойной клик переключает на вкладку отслеживаемых."""
         from ui.main_window import MainWindow
-        from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QTabWidget
+        from PyQt5.QtWidgets import QTabWidget
 
         window = MainWindow.__new__(MainWindow)
         window.db = self.db
         window.tabs = QTabWidget()
+        window._role_manager = MagicMock()
+        window._role_manager.is_admin.return_value = True
+
+        # Мокаем open_table, чтобы избежать QTableWidget без QApplication
+        mock_item = MagicMock()
+        mock_item.text.return_value = 'chrome.exe'
+        window.open_table = MagicMock()
+        window.open_table.item.return_value = mock_item
+
         window.tracked_table = MagicMock()
         window.tracked_table.rowCount.return_value = 1
-        window.tracked_table.item.return_value = QTableWidgetItem('Google Chrome')
-
-        window.open_table = QTableWidget()
-        window.open_table.setColumnCount(4)
-        window.open_table.setRowCount(1)
-        window.open_table.setItem(0, 0, QTableWidgetItem('chrome.exe'))
+        mock_tracked_item = MagicMock()
+        mock_tracked_item.text.return_value = 'Google Chrome'
+        window.tracked_table.item.return_value = mock_tracked_item
 
         window._on_open_double_click(0, 0)
 
         self.assertEqual(window.tabs.currentIndex(), 1)
+        window.tracked_table.selectRow.assert_called_once_with(0)
+        window.tracked_table.scrollToItem.assert_called_once_with(mock_tracked_item)

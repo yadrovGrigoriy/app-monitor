@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QDateEdit, QPushButton, QComboBox
 from PyQt5.QtCore import QDate, pyqtSignal, Qt
-from ui.breadcrumbs import component_tooltip
+
 
 
 class DateToolbar(QWidget):
@@ -23,7 +23,7 @@ class DateToolbar(QWidget):
     def _init_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.setToolTip(component_tooltip(self))
+
 
         layout.addWidget(QLabel('Период:'))
 

@@ -1,0 +1,44 @@
+[project]
+name = "appmonitor"
+version = "1.1.0"
+description = "Монитор активности приложений для Windows"
+requires-python = ">=3.12"
+dependencies = [
+    "PyQt5>=5.15,<5.16",
+    "PyQt5-Qt5==5.15.2",
+    "pywin32>=306",
+    "schedule>=1.2",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "pyqtdarktheme>=0.1",
+    "websockets>=12.0",
+    "zeroconf>=0.132",
+    "cryptography>=41.0",
+    "psutil>=5.9",
+    "matplotlib>=3.8",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-mock>=3.15",
+    "pytest-qt>=4.5",
+    "ruff>=0.11",
+]
+
+[project.scripts]
+appmonitor = "run_app:main"
+appmonitor-admin = "run_admin:main"
+appmonitor-server = "run_server:main"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

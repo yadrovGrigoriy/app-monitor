@@ -17,7 +17,7 @@ from ui.dialogs.settings_dialog import SettingsDialog
 from ui.dialogs.limit_dialog import AddLimitDialog
 from ui.dialogs.stats_dialog import StatsDialog
 from ui.styles import global_style, tab_table_style, COLOR_DANGER
-from ui.breadcrumbs import breadcrumb_title, component_tooltip
+
 from core.logger import setup_logger
 
 logger = setup_logger('ui.main_window')
@@ -54,13 +54,13 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         logger.debug('Инициализация UI')
-        self.setWindowTitle(breadcrumb_title('Главная'))
+        self.setWindowTitle('Главная')
         self.setMinimumSize(720, 500)
         self.resize(900, 600)
         self.setStyleSheet(global_style())
 
         central = QWidget()
-        central.setToolTip(component_tooltip(self))
+
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(24, 16, 24, 16)

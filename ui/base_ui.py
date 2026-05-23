@@ -16,7 +16,7 @@ from PyQt5.QtGui import QColor, QCursor
 from PyQt5.QtWidgets import QMenu, QAction
 
 from ui.styles import global_style, tab_table_style, COLOR_DANGER, COLOR_TEXT_SECONDARY
-from ui.breadcrumbs import breadcrumb_title, component_tooltip
+
 from ui.widgets.bottom_bar import BottomBar
 from ui.widgets.tracked_table import TrackedTable
 from ui.dialogs.auth_dialogs import AuthDialog, RegisterDialog
@@ -46,7 +46,8 @@ class BaseUI(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._role_manager: Optional[RoleManager] = None
+        if not hasattr(self, '_role_manager') or self._role_manager is None:
+            self._role_manager: Optional[RoleManager] = None
         self._settings_authorized = True
         self._extensions: dict[str, int] = {}
 
@@ -198,13 +199,13 @@ class BaseUI(QMainWindow):
 
     def _init_ui(self):
         logger.debug('Инициализация базового UI')
-        self.setWindowTitle(breadcrumb_title('Главная'))
+        self.setWindowTitle('Главная')
         self.setMinimumSize(720, 500)
         self.resize(900, 600)
         self.setStyleSheet(global_style())
 
         central = QWidget()
-        central.setToolTip(component_tooltip(self))
+
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(24, 16, 24, 16)
@@ -235,7 +236,7 @@ class BaseUI(QMainWindow):
         self.activity_table.customContextMenuRequested.connect(self._on_activity_context_menu)
         self.activity_table.cellDoubleClicked.connect(self._on_activity_double_click)
         activity_layout.addWidget(self.activity_table, stretch=1)
-        self.tabs.addTab(self.activity_tab, 'Активность')
+        self.tabs.addTab(self.activity_tab, 'Открытые приложения')
 
         # ── Вкладка 2: Отслеживаемые ────────────────────────────────
         self.tracked_tab = QWidget()
@@ -285,6 +286,12 @@ class BaseUI(QMainWindow):
         self.bottom_bar.refresh_clicked.connect(self._refresh_all)
         self.bottom_bar.auth_clicked.connect(self._open_auth_dialog)
         layout.addWidget(self.bottom_bar)
+
+        # Панель состояния (добавляется наследником)
+        self.status_bar_container = QWidget()
+        self.status_bar_layout = QVBoxLayout(self.status_bar_container)
+        self.status_bar_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.status_bar_container)
 
         logger.debug('Базовый UI инициализирован')
 
@@ -438,9 +445,9 @@ class BaseUI(QMainWindow):
             name_item.setForeground(QColor('#000000'))
             self.activity_table.setItem(i, 1, name_item)
 
-            hours = item['duration_seconds'] // 3600
-            minutes = (item['duration_seconds'] % 3600) // 60
-            secs = item['duration_seconds'] % 60
+            hours = item['total_seconds'] // 3600
+            minutes = (item['total_seconds'] % 3600) // 60
+            secs = item['total_seconds'] % 60
             time_str = f'{hours}:{minutes:02d}:{secs:02d}'
             time_item = QTableWidgetItem(time_str)
             time_item.setTextAlignment(Qt.AlignCenter)
@@ -450,7 +457,7 @@ class BaseUI(QMainWindow):
             limit = limits.get(sys_id)
             limit_item = QTableWidgetItem()
             if limit and limit['enabled']:
-                exceeded = item['duration_seconds'] // 60 >= limit['limit_minutes']
+                exceeded = item['total_seconds'] // 60 >= limit['limit_minutes']
                 limit_str = f'{limit["limit_minutes"]} мин'
                 if exceeded:
                     limit_str += ' ⚠'
@@ -465,7 +472,7 @@ class BaseUI(QMainWindow):
             self.activity_table.setItem(i, 3, limit_item)
 
             # Цвет фона строки
-            if limit and limit['enabled'] and item['duration_seconds'] // 60 >= limit['limit_minutes']:
+            if limit and limit['enabled'] and item['total_seconds'] // 60 >= limit['limit_minutes']:
                 bg = QColor('#fde7e9')
             else:
                 bg = QColor('#ffffff')
@@ -510,9 +517,18 @@ class BaseUI(QMainWindow):
 
     def _refresh_all(self):
         """Обновить все вкладки."""
-        self._refresh_activity_tab()
-        self._refresh_tracked_tab()
-        self._refresh_excluded_tab()
+        try:
+            self._refresh_activity_tab()
+        except Exception as e:
+            logger.error(f'Ошибка обновления активности: {e}', exc_info=True)
+        try:
+            self._refresh_tracked_tab()
+        except Exception as e:
+            logger.error(f'Ошибка обновления отслеживаемых: {e}', exc_info=True)
+        try:
+            self._refresh_excluded_tab()
+        except Exception as e:
+            logger.error(f'Ошибка обновления исключений: {e}', exc_info=True)
 
     # ── Обработчики вкладок ─────────────────────────────────────────
 
@@ -663,9 +679,15 @@ class BaseUI(QMainWindow):
     def _open_stats(self):
         """Открыть окно статистики."""
         logger.info('Открытие окна статистики')
-        dialog = StatsDialog(None, self)
-        dialog.db = self
-        dialog.exec_()
+        try:
+            db = getattr(self, 'db', None)
+            if db is None:
+                logger.error('Нет доступа к базе данных для статистики')
+                return
+            dialog = StatsDialog(db, self)
+            dialog.exec_()
+        except Exception as e:
+            logger.error(f'Ошибка при открытии статистики: {e}', exc_info=True)
 
     # ── Авторизация ─────────────────────────────────────────────────
 
@@ -719,9 +741,15 @@ class BaseUI(QMainWindow):
             password = dialog.password_input.text()
             if self.verify_local(username, password):
                 logger.info(f'Локальная авторизация: {username}')
-                self._role_manager.set_role(ROLE_ADMIN)
-                self._apply_role_restrictions()
-                self._refresh_all()
+                try:
+                    self._role_manager.set_role(ROLE_ADMIN)
+                    logger.info('Роль установлена, применяем ограничения...')
+                    self._apply_role_restrictions()
+                    logger.info('Ограничения применены, обновляем UI...')
+                    self._refresh_all()
+                    logger.info('UI обновлён, авторизация завершена')
+                except Exception as e:
+                    logger.error(f'Ошибка после авторизации: {e}', exc_info=True)
                 return
 
             QMessageBox.warning(self, "Ошибка", "Неверный логин или пароль")
@@ -743,11 +771,15 @@ class BaseUI(QMainWindow):
             self.excluded_table.setContextMenuPolicy(Qt.CustomContextMenu)
             try:
                 self.tracked_table.cellDoubleClicked.disconnect()
-            except TypeError:
+            except (TypeError, RuntimeError):
                 pass
-            self.tracked_table.cellDoubleClicked.connect(
-                self.tracked_table._on_double_click
-            )
+            try:
+                self.tracked_table.cellDoubleClicked.connect(
+                    self.tracked_table._on_double_click
+                )
+            except RuntimeError:
+                logger.warning('Не удалось подключить cellDoubleClicked')
+                pass
             logger.debug('Роль Admin: полный доступ')
         else:
             self._show_excluded_tab(False)
@@ -796,9 +828,15 @@ class BaseUI(QMainWindow):
         self._active_timer.stop()
         logger.info('Ресурсы очищены')
 
+    def closeEvent(self, event):
+        """При закрытии окна сворачиваем в трей."""
+        logger.debug('Закрытие окна — сворачивание в трей')
+        self.hide()
+        event.ignore()
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_F4 and event.modifiers() & Qt.AltModifier:
-            logger.debug('Alt+F4 заблокирован — сворачивание в трей')
+            logger.debug('Alt+F4 — сворачивание в трей')
             self.hide()
             return
         super().keyPressEvent(event)

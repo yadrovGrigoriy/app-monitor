@@ -1,3 +1,12 @@
+"""
+Точка входа по умолчанию — запуск AppMonitor (AppUI + монитор + API + планировщик).
+
+Для раздельного запуска используйте:
+  python run_app.py      — только пользовательский интерфейс
+  python run_admin.py    — удалённое администрирование (AdminUI)
+  python run_server.py   — только API-сервер (без GUI)
+"""
+
 import sys
 import os
 from PyQt5.QtWidgets import QApplication, QMessageBox
@@ -8,23 +17,25 @@ from core.database import Database
 from core.monitor import ActivityMonitor
 from core.autostart import AutostartManager
 from core.scheduler import DailyScheduler
+from core.updater import APP_VERSION
+from ui.dialogs.update_dialog import _check_updates_background
 from api.server import AppMonitorAPI
 from core.logger import setup_logger
-from core.self_protect import init_self_protection
 
 logger = setup_logger('main')
 
 API_HOST = '0.0.0.0'
 API_PORT = 8765
 
+# SSL-сертификаты для HTTPS (опционально)
+SSL_CERT_FILE = os.path.join(os.path.dirname(__file__), 'data', 'cert.pem')
+SSL_KEY_FILE = os.path.join(os.path.dirname(__file__), 'data', 'key.pem')
+
 MUTEX_NAME = r'Global\AppMonitor_SingleInstance'
 
 
 def _check_single_instance() -> bool:
-    """Проверить, не запущен ли уже экземпляр монитора.
-    Убивает старые процессы с тем же sys.executable и main.py в cmdline,
-    у которых create_time меньше текущего (запущены раньше).
-    Возвращает True, если можно продолжать."""
+    """Проверить, не запущен ли уже экземпляр монитора."""
     try:
         import psutil
         import time
@@ -44,7 +55,7 @@ def _check_single_instance() -> bool:
                 if name not in ('python.exe', 'pythonw.exe'):
                     continue
                 cmdline = ' '.join(proc.info['cmdline'] or []).lower()
-                if 'main.py' not in cmdline:
+                if 'main.py' not in cmdline and 'run_app.py' not in cmdline:
                     continue
                 proc_create_time = proc.info['create_time']
                 if proc_create_time and current_create_time - proc_create_time > 1.0:
@@ -53,7 +64,6 @@ def _check_single_instance() -> bool:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
 
-        # Создаём mutex
         import win32event
         import win32api
         import winerror
@@ -99,15 +109,11 @@ def main():
             os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugins_path
             logger.debug(f'QT plugins path: {plugins_path}')
 
-    # Самозащита монитора от завершения
-    init_self_protection()
-
     app = QApplication(sys.argv)
     app.setApplicationName('AppMonitor')
     app.setApplicationDisplayName('Монитор активности приложений')
     app.setWindowIcon(create_app_icon())
 
-    # На Windows задаём AppUserModelID, чтобы иконка в панели задач была нашей
     if os.name == 'nt':
         try:
             import ctypes
@@ -117,20 +123,25 @@ def main():
         except Exception as e:
             logger.warning(f'Не удалось установить AppUserModelID: {e}')
     app.setQuitOnLastWindowClosed(False)
-    # Блокируем завершение приложения через любые механизмы Qt
-    app.aboutToQuit.connect(lambda: None)  # заглушка, чтобы сигнал был занят
+    app.aboutToQuit.connect(lambda: None)
 
     logger.info('QApplication создана')
 
     db = Database()
     logger.info('База данных инициализирована')
 
-    # Применяем сохранённую тему (по умолчанию тёмная)
     saved_theme = db.get_setting(THEME_SETTING_KEY, THEME_DARK)
     apply_theme(app, saved_theme)
 
-    # Запуск API-сервера для удалённого доступа
-    api_server = AppMonitorAPI(db, host=API_HOST, port=API_PORT)
+    ssl_cert = SSL_CERT_FILE if os.path.isfile(SSL_CERT_FILE) else None
+    ssl_key = SSL_KEY_FILE if os.path.isfile(SSL_KEY_FILE) else None
+    if ssl_cert and ssl_key:
+        logger.info('SSL-сертификаты найдены, API будет работать по HTTPS')
+    else:
+        logger.info('SSL-сертификаты не найдены, API работает по HTTP')
+
+    api_server = AppMonitorAPI(db, host=API_HOST, port=API_PORT,
+                                ssl_certfile=ssl_cert, ssl_keyfile=ssl_key)
     api_server.start()
 
     autostart = AutostartManager()
@@ -145,13 +156,24 @@ def main():
 
     monitor = ActivityMonitor(db)
     window = AppUI(db, monitor)
-    # Явно устанавливаем иконку на окно (для панели задач Windows)
     window.setWindowIcon(create_app_icon())
     logger.info('Главное окно создано')
 
     monitor.start()
     window._refresh_all()
     window.show()
+
+    # Фоновая проверка обновлений
+    from PyQt5.QtCore import QTimer
+    from core.updater import UPDATE_CHECK_INTERVAL_SECONDS
+
+    # Первая проверка через 5 секунд после старта
+    QTimer.singleShot(5000, _check_updates_background)
+
+    # Затем проверка каждые UPDATE_CHECK_INTERVAL_SECONDS секунд
+    _update_timer = QTimer()
+    _update_timer.timeout.connect(_check_updates_background)
+    _update_timer.start(UPDATE_CHECK_INTERVAL_SECONDS * 1000)
 
     logger.info('Вход в цикл событий Qt')
     try:

@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication
 from PyQt5.QtCore import pyqtSignal, QObject
+from PyQt5.QtGui import QIcon
 from core.notifier import Notifier
-from ui.breadcrumbs import component_tooltip
+
 from ui.app_icon import create_app_icon
 
 
@@ -10,11 +11,12 @@ class TrayManager(QObject):
     show_requested = pyqtSignal()
     settings_requested = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, icon: QIcon | None = None):
         super().__init__(parent)
         self.parent = parent
         self.tray_icon = None
         self.notifier = None
+        self._icon = icon or create_app_icon()
         self._init_tray()
 
     def _cleanup_orphan_tray_icons(self):
@@ -67,8 +69,8 @@ class TrayManager(QObject):
         self._cleanup_orphan_tray_icons()
 
         self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(create_app_icon())
-        self.tray_icon.setToolTip(component_tooltip(self))
+        self.tray_icon.setIcon(self._icon)
+
 
         tray_menu = QMenu(self.parent)
         show_action = QAction('Показать', self.parent)

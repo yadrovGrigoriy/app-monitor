@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QPushButton
 from PyQt5.QtCore import pyqtSignal
-from ui.breadcrumbs import component_tooltip
+
 
 
 class BottomBar(QWidget):
@@ -17,7 +17,7 @@ class BottomBar(QWidget):
     def _init_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.setToolTip(component_tooltip(self))
+
 
         self.btn_settings = QPushButton('Настройки')
         self.btn_settings.clicked.connect(self.settings_clicked)

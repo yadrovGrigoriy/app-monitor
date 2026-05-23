@@ -1,7 +1,25 @@
 """Программно создаваемая иконка приложения AppMonitor."""
 
-from PyQt5.QtGui import QPixmap, QPainter, QColor, QPen, QFont, QIcon
-from PyQt5.QtCore import Qt, QRect
+from PyQt5.QtGui import QPixmap, QPainter, QColor, QPen, QFont, QIcon, QLinearGradient
+from PyQt5.QtCore import Qt, QRect, QPointF
+from PyQt5.QtGui import QPolygonF
+
+
+# Цветовая схема — современный градиент (AppUI)
+_COLOR_BG_DARK = QColor("#0f0f1a")
+_COLOR_BG_LIGHT = QColor("#1a1a2e")
+_COLOR_ACCENT = QColor("#00d4ff")
+_COLOR_ACCENT2 = QColor("#7b2ff7")
+_COLOR_GRID = QColor("#2a2a4a")
+_COLOR_TEXT = QColor("#ffffff")
+
+# Цветовая схема для AdminUI — золотисто-оранжевая
+_ADMIN_COLOR_BG_DARK = QColor("#1a0f0f")
+_ADMIN_COLOR_BG_LIGHT = QColor("#2e1a1a")
+_ADMIN_COLOR_ACCENT = QColor("#ff8c00")
+_ADMIN_COLOR_ACCENT2 = QColor("#ffd700")
+_ADMIN_COLOR_GRID = QColor("#4a2a2a")
+_ADMIN_COLOR_TEXT = QColor("#ffffff")
 
 
 def _draw_monitor_icon(size: int = 64) -> QPixmap:
@@ -12,74 +30,176 @@ def _draw_monitor_icon(size: int = 64) -> QPixmap:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
 
-    margin = size // 8
-    body_rect = QRect(margin, margin, size - 2 * margin, size - 2 * margin - size // 6)
+    m = size // 10  # margin
+    body = QRect(m, m, size - 2 * m, size - 2 * m - size // 5)
 
-    # Корпус монитора
-    painter.setPen(QPen(QColor("#0078D4"), max(1, size // 32)))
-    painter.setBrush(QColor("#1a1a2e"))
-    painter.drawRoundedRect(body_rect, size // 12, size // 12)
+    # ── Корпус монитора (градиент) ────────────────────────────────
+    grad = QLinearGradient(QPointF(0, 0), QPointF(size, size))
+    grad.setColorAt(0.0, _COLOR_BG_DARK)
+    grad.setColorAt(1.0, _COLOR_BG_LIGHT)
+    painter.setPen(QPen(_COLOR_ACCENT, max(1, size // 40)))
+    painter.setBrush(grad)
+    painter.drawRoundedRect(body, size // 10, size // 10)
 
-    # Экран (внутренняя область)
-    screen_margin = size // 12
-    screen_rect = QRect(
-        body_rect.x() + screen_margin,
-        body_rect.y() + screen_margin,
-        body_rect.width() - 2 * screen_margin,
-        body_rect.height() - 2 * screen_margin,
+    # ── Экран ──────────────────────────────────────────────────────
+    sm = size // 14
+    screen = QRect(
+        body.x() + sm,
+        body.y() + sm,
+        body.width() - 2 * sm,
+        body.height() - 2 * sm,
     )
     painter.setPen(Qt.NoPen)
-    painter.setBrush(QColor("#16213e"))
-    painter.drawRoundedRect(screen_rect, size // 20, size // 20)
+    painter.setBrush(QColor("#0a0a14"))
+    painter.drawRoundedRect(screen, size // 24, size // 24)
 
-    # График (линия)
-    painter.setPen(QPen(QColor("#00d2ff"), max(1, size // 32)))
-    painter.setBrush(Qt.NoBrush)
+    # ── Сетка на экране ───────────────────────────────────────────
+    painter.setPen(QPen(_COLOR_GRID, 1))
+    for i in range(1, 4):
+        y = screen.y() + screen.height() * i // 4
+        painter.drawLine(screen.x() + 2, y, screen.right() - 2, y)
+    for i in range(1, 5):
+        x = screen.x() + screen.width() * i // 5
+        painter.drawLine(x, screen.y() + 2, x, screen.bottom() - 2)
 
-    chart_w = screen_rect.width()
-    chart_h = screen_rect.height()
-    chart_x = screen_rect.x()
-    chart_y = screen_rect.y()
+    # ── График (столбцы) ──────────────────────────────────────────
+    bar_count = 5
+    bar_w = screen.width() // (bar_count * 3)
+    bar_gap = bar_w * 2
+    bar_base = screen.bottom() - 2
+    bar_heights = [0.35, 0.65, 0.45, 0.80, 0.55]
 
-    # Точки графика
-    points = [
-        (chart_x + chart_w * 0.05, chart_y + chart_h * 0.85),
-        (chart_x + chart_w * 0.20, chart_y + chart_h * 0.60),
-        (chart_x + chart_w * 0.35, chart_y + chart_h * 0.75),
-        (chart_x + chart_w * 0.50, chart_y + chart_h * 0.35),
-        (chart_x + chart_w * 0.65, chart_y + chart_h * 0.50),
-        (chart_x + chart_w * 0.80, chart_y + chart_h * 0.20),
-        (chart_x + chart_w * 0.95, chart_y + chart_h * 0.40),
-    ]
+    for i, h in enumerate(bar_heights):
+        x = screen.x() + bar_gap * i + bar_gap // 2
+        bh = int(screen.height() * h)
+        bar_rect = QRect(x, bar_base - bh, bar_w, bh)
 
-    for i in range(len(points) - 1):
-        painter.drawLine(
-            int(points[i][0]), int(points[i][1]),
-            int(points[i + 1][0]), int(points[i + 1][1]),
+        bar_grad = QLinearGradient(
+            QPointF(0, bar_base - bh),
+            QPointF(0, bar_base),
         )
+        bar_grad.setColorAt(0.0, _COLOR_ACCENT2)
+        bar_grad.setColorAt(1.0, _COLOR_ACCENT)
+        painter.setBrush(bar_grad)
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(bar_rect, 2, 2)
 
-    # Точки на графике
-    painter.setBrush(QColor("#00d2ff"))
-    for px, py in points:
-        painter.drawEllipse(int(px) - 1, int(py) - 1, 3, 3)
+    # ── Подставка монитора ────────────────────────────────────────
+    stand_top = body.bottom()
+    stand_bottom = size - m
+    cx = size // 2
+    sw = size // 5
 
-    # Подставка монитора
-    stand_top = body_rect.bottom()
-    stand_bottom = size - margin
-    stand_center_x = size // 2
-    stand_width = size // 6
-
-    painter.setPen(QPen(QColor("#0078D4"), max(1, size // 32)))
-    painter.setBrush(QColor("#1a1a2e"))
+    painter.setPen(QPen(_COLOR_ACCENT, max(1, size // 40)))
+    painter.setBrush(_COLOR_BG_LIGHT)
     # Ножка
-    painter.drawRect(stand_center_x - stand_width // 4, stand_top, stand_width // 2, stand_bottom - stand_top)
+    painter.drawRect(cx - sw // 6, stand_top, sw // 3, stand_bottom - stand_top)
     # Основание
     painter.drawRoundedRect(
-        stand_center_x - stand_width,
-        stand_bottom - size // 16,
-        stand_width * 2,
-        size // 16,
-        size // 32, size // 32,
+        cx - sw,
+        stand_bottom - size // 20,
+        sw * 2,
+        size // 20,
+        size // 40, size // 40,
+    )
+
+    painter.end()
+    return pixmap
+
+
+def _draw_admin_icon(size: int = 64) -> QPixmap:
+    """Нарисовать иконку админки — монитор с ключом/щитом."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+
+    m = size // 10
+    body = QRect(m, m, size - 2 * m, size - 2 * m - size // 5)
+
+    # ── Корпус монитора (градиент) ────────────────────────────────
+    grad = QLinearGradient(QPointF(0, 0), QPointF(size, size))
+    grad.setColorAt(0.0, _ADMIN_COLOR_BG_DARK)
+    grad.setColorAt(1.0, _ADMIN_COLOR_BG_LIGHT)
+    painter.setPen(QPen(_ADMIN_COLOR_ACCENT, max(1, size // 40)))
+    painter.setBrush(grad)
+    painter.drawRoundedRect(body, size // 10, size // 10)
+
+    # ── Экран ──────────────────────────────────────────────────────
+    sm = size // 14
+    screen = QRect(
+        body.x() + sm,
+        body.y() + sm,
+        body.width() - 2 * sm,
+        body.height() - 2 * sm,
+    )
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#140a0a"))
+    painter.drawRoundedRect(screen, size // 24, size // 24)
+
+    # ── Сетка на экране ───────────────────────────────────────────
+    painter.setPen(QPen(_ADMIN_COLOR_GRID, 1))
+    for i in range(1, 4):
+        y = screen.y() + screen.height() * i // 4
+        painter.drawLine(screen.x() + 2, y, screen.right() - 2, y)
+    for i in range(1, 5):
+        x = screen.x() + screen.width() * i // 5
+        painter.drawLine(x, screen.y() + 2, x, screen.bottom() - 2)
+
+    # ── Символ ключа/щита на экране ───────────────────────────────
+    cx = screen.center().x()
+    cy = screen.center().y()
+    r = min(screen.width(), screen.height()) // 3
+
+    # Щит
+    shield_points = [
+        QPointF(cx, cy - r),
+        QPointF(cx + r, cy - r // 2),
+        QPointF(cx + r, cy + r // 3),
+        QPointF(cx, cy + r),
+        QPointF(cx - r, cy + r // 3),
+        QPointF(cx - r, cy - r // 2),
+    ]
+    shield_grad = QLinearGradient(QPointF(cx - r, cy), QPointF(cx + r, cy))
+    shield_grad.setColorAt(0.0, _ADMIN_COLOR_ACCENT2)
+    shield_grad.setColorAt(1.0, _ADMIN_COLOR_ACCENT)
+    painter.setBrush(shield_grad)
+    painter.setPen(QPen(QColor("#ffffff"), max(1, size // 50)))
+    polygon = QPolygonF(shield_points)
+    painter.drawPolygon(polygon)
+
+    # Галочка внутри щита
+    pen_check = QPen(QColor("#ffffff"), max(2, size // 20))
+    pen_check.setCapStyle(Qt.RoundCap)
+    painter.setPen(pen_check)
+    painter.setBrush(Qt.NoBrush)
+    cx_f = float(cx)
+    cy_f = float(cy)
+    painter.drawLine(
+        QPointF(cx_f - r * 0.3, cy_f),
+        QPointF(cx_f - r * 0.05, cy_f + r * 0.35),
+    )
+    painter.drawLine(
+        QPointF(cx_f - r * 0.05, cy_f + r * 0.35),
+        QPointF(cx_f + r * 0.4, cy_f - r * 0.3),
+    )
+
+    # ── Подставка монитора ────────────────────────────────────────
+    stand_top = body.bottom()
+    stand_bottom = size - m
+    cx = size // 2
+    sw = size // 5
+
+    painter.setPen(QPen(_ADMIN_COLOR_ACCENT, max(1, size // 40)))
+    painter.setBrush(_ADMIN_COLOR_BG_LIGHT)
+    painter.drawRect(cx - sw // 6, stand_top, sw // 3, stand_bottom - stand_top)
+    painter.drawRoundedRect(
+        cx - sw,
+        stand_bottom - size // 20,
+        sw * 2,
+        size // 20,
+        size // 40, size // 40,
     )
 
     painter.end()
@@ -87,10 +207,16 @@ def _draw_monitor_icon(size: int = 64) -> QPixmap:
 
 
 def create_app_icon() -> QIcon:
-    """Создать иконку приложения AppMonitor."""
-    pixmap = _draw_monitor_icon(64)
-    icon = QIcon(pixmap)
-    # Добавляем версию меньшего размера для панели задач
-    small_pixmap = _draw_monitor_icon(32)
-    icon.addPixmap(small_pixmap)
+    """Создать иконку приложения AppMonitor (пользовательский режим)."""
+    icon = QIcon()
+    for s in (16, 24, 32, 48, 64, 128, 256):
+        icon.addPixmap(_draw_monitor_icon(s))
+    return icon
+
+
+def create_admin_icon() -> QIcon:
+    """Создать иконку для AdminUI (режим администратора)."""
+    icon = QIcon()
+    for s in (16, 24, 32, 48, 64, 128, 256):
+        icon.addPixmap(_draw_admin_icon(s))
     return icon

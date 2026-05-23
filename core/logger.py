@@ -18,7 +18,9 @@ def setup_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
 
-    if not logger.handlers:
+    # Проверяем, есть ли уже корневые хендлеры
+    root = logging.getLogger()
+    if not root.handlers:
         # Файловый handler — всё подряд
         file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
@@ -27,7 +29,7 @@ def setup_logger(name: str) -> logging.Logger:
             datefmt='%H:%M:%S'
         )
         file_handler.setFormatter(file_fmt)
-        logger.addHandler(file_handler)
+        root.addHandler(file_handler)
 
         # Консольный handler — DEBUG и выше
         console_handler = logging.StreamHandler(sys.stdout)
@@ -37,6 +39,11 @@ def setup_logger(name: str) -> logging.Logger:
             datefmt='%H:%M:%S'
         )
         console_handler.setFormatter(console_fmt)
-        logger.addHandler(console_handler)
+        root.addHandler(console_handler)
+
+    # Чтобы сообщения от дочерних логгеров не дублировались,
+    # отключаем propagation, если у логгера есть свои хендлеры
+    # (сейчас хендлеров нет, всё идёт через root)
+    logger.propagate = True
 
     return logger

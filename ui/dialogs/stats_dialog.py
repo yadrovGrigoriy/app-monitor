@@ -109,15 +109,26 @@ class StatsDialog(QDialog):
 
     def _build_chart(self):
         """Построить столбчатую диаграмму."""
-        start_date, end_date = self._get_date_range()
-        logger.debug(f'Построение графика за период: {start_date} — {end_date}')
+        try:
+            start_date, end_date = self._get_date_range()
+            logger.debug(f'Построение графика за период: {start_date} — {end_date}')
 
-        # Получаем данные: все приложения или только отслеживаемые
-        tracked_only = self.tracked_only_check.isChecked()
-        if tracked_only:
-            activity = self.db.get_tracked_activity_for_period(start_date, end_date)
-        else:
-            activity = self.db.get_activity_for_period(start_date, end_date)
+            # Получаем данные: все приложения или только отслеживаемые
+            tracked_only = self.tracked_only_check.isChecked()
+            if tracked_only:
+                activity = self.db.get_tracked_activity_for_period(start_date, end_date)
+            else:
+                activity = self.db.get_activity_for_period(start_date, end_date)
+        except Exception as e:
+            logger.error(f'Ошибка при получении данных для графика: {e}', exc_info=True)
+            self.figure.clear()
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, f'Ошибка: {e}', ha='center', va='center', fontsize=12, color='red')
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+            self.canvas.draw()
+            return
 
         self.figure.clear()
         ax = self.figure.add_subplot(111)

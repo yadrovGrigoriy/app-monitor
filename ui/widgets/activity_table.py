@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QMenu, QAction
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QCursor
-from ui.breadcrumbs import component_tooltip
+
 from ui.styles import table_style
 
 COLOR_SUCCESS = "#107c10"
@@ -18,7 +18,7 @@ class ActivityTable(QTableWidget):
         self._init_ui()
 
     def _init_ui(self):
-        self.setToolTip(component_tooltip(self))
+
         self.setColumnCount(5)
         self.setHorizontalHeaderLabels(['Имя процесса', 'Приложение', 'Время', 'Лимит', 'Осталось'])
         self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)

@@ -12,9 +12,10 @@ from core.auth import AuthManager
 from core.autostart import AutostartManager
 from core.logger import setup_logger
 from ui.styles import global_style, COLOR_DANGER
-from ui.breadcrumbs import breadcrumb_title, component_tooltip
+
 from ui.dialogs.auth_dialogs import AuthDialog, RegisterDialog
 from ui.dialogs.limit_dialog import AddLimitDialog, EditLimitDialog
+from ui.dialogs.update_dialog import UpdateDialog
 from ui.theme_manager import THEME_LIGHT, THEME_DARK, THEME_SETTING_KEY, apply_theme
 
 logger = setup_logger('ui.settings')
@@ -72,8 +73,7 @@ class SettingsDialog(QDialog):
         return False
 
     def _init_ui(self):
-        self.setWindowTitle(breadcrumb_title('Настройки'))
-        self.setToolTip(component_tooltip(self))
+        self.setWindowTitle('Настройки')
         self.setMinimumSize(620, 520)
         self.resize(680, 560)
         self.setStyleSheet(global_style())
@@ -181,6 +181,15 @@ class SettingsDialog(QDialog):
         theme_layout.addRow('Тема:', self.theme_combo)
 
         general_layout.addWidget(theme_group)
+
+        # ── Группа обновлений ─────────────────────────────────────────
+        update_group = QGroupBox('Обновления')
+        update_group_layout = QVBoxLayout(update_group)
+        btn_check_update = QPushButton('Проверить обновления')
+        btn_check_update.clicked.connect(self._check_updates)
+        update_group_layout.addWidget(btn_check_update)
+        general_layout.addWidget(update_group)
+
         general_layout.addStretch()
 
         # ── Вкладка исключений ──────────────────────────────────────
@@ -254,7 +263,7 @@ class SettingsDialog(QDialog):
 
             # Приложение
             name_item = QTableWidgetItem(limit['app_name'])
-            name_item.setToolTip('Двойной клик для редактирования')
+
             if row_bg:
                 name_item.setBackground(row_bg)
             if limit['enabled'] and left == 0:
@@ -374,6 +383,11 @@ class SettingsDialog(QDialog):
             logger.info('Автозагрузка отключена через настройки')
             self.autostart.disable()
 
+    def _check_updates(self):
+        """Открыть диалог проверки обновлений."""
+        dialog = UpdateDialog(self)
+        dialog.exec_()
+
     def _save_settings(self):
         if not self._authorized:
             QMessageBox.warning(self, "Ошибка", "Требуется авторизация")
@@ -453,7 +467,7 @@ class SettingsDialog(QDialog):
         self.report_enabled.setChecked(self.db.get_setting('report_enabled', '0') == '1')
 
         # Загружаем сохранённую тему
-        saved_theme = self.db.get_setting(THEME_SETTING_KEY, THEME_DARK)
+        saved_theme = self.db.get_setting(THEME_SETTING_KEY, THEME_LIGHT)
         idx = self.theme_combo.findData(saved_theme)
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)

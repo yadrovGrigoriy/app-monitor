@@ -6,6 +6,7 @@ AdminUI — удалённый интерфейс администрирован
 import datetime
 import json
 import asyncio
+import os
 from typing import Optional
 
 import httpx
@@ -15,12 +16,15 @@ from PyQt5.QtWidgets import (
     QGroupBox, QLabel, QLineEdit, QPushButton, QMessageBox,
     QDialog, QFormLayout, QDialogButtonBox, QDateEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QSpinBox, QCheckBox,
+    QProgressDialog, QComboBox,
 )
-from PyQt5.QtCore import Qt, QTimer, QDate, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QDate, QThread, pyqtSignal, QMutex, QMutexLocker
 from PyQt5.QtGui import QColor
 
 from ui.base_ui import BaseUI
 from ui.styles import global_style, COLOR_DANGER, COLOR_TEXT_SECONDARY
+from ui.tray_manager import TrayManager
+from ui.app_icon import create_admin_icon
 from core.role_manager import RoleManager, ROLE_ADMIN, ROLE_USER
 from core.logger import setup_logger
 
@@ -30,10 +34,12 @@ logger = setup_logger('ui.admin_ui')
 class AdminClient:
     """HTTP-клиент для общения с сервером монитора."""
 
-    def __init__(self, base_url: str = "http://localhost:8765"):
+    def __init__(self, base_url: str = "https://localhost:8765"):
         self.base_url = base_url.rstrip("/")
         self.ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://")
         self._token: str | None = None
+        # Отключаем проверку SSL для самоподписанных сертификатов
+        self._client = httpx.Client(verify=False, timeout=5)
 
     def _headers(self) -> dict:
         h = {}
@@ -42,23 +48,29 @@ class AdminClient:
         return h
 
     def _get(self, path: str):
-        r = httpx.get(f"{self.base_url}{path}", headers=self._headers(), timeout=5)
+        r = self._client.get(f"{self.base_url}{path}", headers=self._headers())
         r.raise_for_status()
         return r.json()
 
     def _post(self, path: str, data: dict):
-        r = httpx.post(f"{self.base_url}{path}", json=data, headers=self._headers(), timeout=5)
+        r = self._client.post(f"{self.base_url}{path}", json=data, headers=self._headers())
         r.raise_for_status()
         return r.json()
 
     def _delete(self, path: str):
-        r = httpx.delete(f"{self.base_url}{path}", headers=self._headers(), timeout=5)
+        r = self._client.delete(f"{self.base_url}{path}", headers=self._headers())
         r.raise_for_status()
         return r.json()
 
     def login(self, username: str, password: str) -> bool:
+        """Авторизация. Отправляет запрос без токена."""
         try:
-            resp = self._post("/api/auth/login", {"username": username, "password": password})
+            r = self._client.post(
+                f"{self.base_url}/api/auth/login",
+                json={"username": username, "password": password},
+            )
+            r.raise_for_status()
+            resp = r.json()
             self._token = resp["token"]
             logger.info(f'Авторизован как {username}')
             return True
@@ -141,7 +153,7 @@ class _AdminLoginDialog(QDialog):
         self.setMinimumWidth(350)
         layout = QFormLayout(self)
         layout.addRow(QLabel("Авторизация администратора:"))
-        self.username_input = QLineEdit()
+        self.username_input = QLineEdit("admin")
         self.username_input.setPlaceholderText("admin")
         layout.addRow("Логин:", self.username_input)
         self.password_input = QLineEdit()
@@ -150,12 +162,24 @@ class _AdminLoginDialog(QDialog):
         layout.addRow("Пароль:", self.password_input)
         btn_layout = QHBoxLayout()
         btn_ok = QPushButton("Войти")
-        btn_ok.clicked.connect(self.accept)
+        btn_ok.clicked.connect(self._accept)
         btn_layout.addWidget(btn_ok)
         btn_cancel = QPushButton("Отмена")
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
         layout.addRow(btn_layout)
+
+    def _accept(self):
+        """Проверить поля перед закрытием."""
+        if not self.username_input.text().strip():
+            QMessageBox.warning(self, "Ошибка", "Введите логин")
+            self.username_input.setFocus()
+            return
+        if not self.password_input.text():
+            QMessageBox.warning(self, "Ошибка", "Введите пароль")
+            self.password_input.setFocus()
+            return
+        self.accept()
 
 
 class AdminUI(BaseUI):
@@ -169,6 +193,7 @@ class AdminUI(BaseUI):
     """
 
     def __init__(self):
+        logger.info('AdminUI.__init__: начало')
         self.api: AdminClient | None = None
         self._ws_worker = None
         self._role_manager = RoleManager(None)  # заглушка, роль всегда admin
@@ -179,19 +204,53 @@ class AdminUI(BaseUI):
         self._cached_excluded: list = []
         self._cached_apps: list = []
         self._current_date: str = datetime.date.today().isoformat()
+        self._server_history: list[str] = self._load_server_history()
+        logger.info('AdminUI.__init__: поля инициализированы, вызываем super().__init__()')
 
         super().__init__()
 
+        logger.info('AdminUI.__init__: super() готов, добавляем панели')
+        # Устанавливаем иконку окна для панели задач
+        icon = create_admin_icon()
+        self.setWindowIcon(icon)
+        # Принудительное обновление иконки в трее Windows
+        QTimer.singleShot(0, lambda: self._force_window_icon(icon))
+        self._init_tray()
         self._add_connection_panel()
         self._add_date_picker()
         self._apply_role_restrictions()
+        # Показываем диалог выбора при запуске
+        QTimer.singleShot(500, self._show_startup_dialog)
+        logger.info('AdminUI.__init__: завершено')
+
+    @staticmethod
+    def _force_window_icon(icon):
+        """Принудительно обновить иконку окна в панели задач Windows.
+
+        Qt не всегда обновляет иконку в панели задач после setWindowIcon,
+        особенно если окно уже было создано. Этот трюк переустанавливает
+        иконку через атрибут NativeWindowHandles.
+        """
+        app = QApplication.instance()
+        if app is None:
+            return
+        # Переустанавливаем иконку приложения (влияет на все окна)
+        app.setWindowIcon(icon)
 
     # ── Панель подключения ──────────────────────────────────────────
 
     def _add_connection_panel(self):
         """Добавить панель подключения к серверу."""
+        logger.info('AdminUI._add_connection_panel: начало')
         central = self.centralWidget()
+        if central is None:
+            logger.error('AdminUI._add_connection_panel: centralWidget() is None!')
+            return
         layout = central.layout()
+        if layout is None:
+            logger.error('AdminUI._add_connection_panel: layout is None!')
+            return
+        logger.info('AdminUI._add_connection_panel: central виджет получен')
 
         # Вставляем панель подключения первой
         conn_widget = QWidget()
@@ -199,13 +258,26 @@ class AdminUI(BaseUI):
         conn_layout.setContentsMargins(0, 0, 0, 8)
 
         conn_layout.addWidget(QLabel("Сервер:"))
-        self.server_input = QLineEdit("192.168.1.100:8765")
-        self.server_input.setPlaceholderText("IP:порт (например, 192.168.1.100:8765)")
+        self.server_input = QComboBox()
+        self.server_input.setEditable(True)
+        self.server_input.setInsertPolicy(QComboBox.NoInsert)
+        self.server_input.setPlaceholderText("https://IP:порт (например, https://192.168.1.100:8765)")
+        # Загружаем историю подключений
+        for addr in self._server_history:
+            self.server_input.addItem(addr)
+        if self._server_history:
+            self.server_input.setCurrentText(self._server_history[0])
+        else:
+            self.server_input.setCurrentText("https://localhost:8765")
         conn_layout.addWidget(self.server_input)
 
         btn_connect = QPushButton("Подключиться")
         btn_connect.clicked.connect(self._connect)
         conn_layout.addWidget(btn_connect)
+
+        btn_discover = QPushButton("Найти серверы")
+        btn_discover.clicked.connect(self._discover_servers)
+        conn_layout.addWidget(btn_discover)
 
         self.conn_status = QLabel("Не подключён")
         self.conn_status.setStyleSheet(f"color: {COLOR_DANGER};")
@@ -218,8 +290,15 @@ class AdminUI(BaseUI):
 
     def _add_date_picker(self):
         """Добавить панель выбора даты."""
+        logger.info('AdminUI._add_date_picker: начало')
         central = self.centralWidget()
+        if central is None:
+            logger.error('AdminUI._add_date_picker: centralWidget() is None!')
+            return
         layout = central.layout()
+        if layout is None:
+            logger.error('AdminUI._add_date_picker: layout is None!')
+            return
 
         date_widget = QWidget()
         date_layout = QHBoxLayout(date_widget)
@@ -246,45 +325,489 @@ class AdminUI(BaseUI):
         self._current_date = qdate.toString(Qt.ISODate)
         self._refresh_all()
 
+    # ── Трей ────────────────────────────────────────────────────────
+
+    def _init_tray(self):
+        """Создать иконку в системном трее."""
+        logger.debug('AdminUI: инициализация трей-иконки')
+        self.tray = TrayManager(self, icon=create_admin_icon())
+        self.tray.show_requested.connect(self.show_and_raise)
+        logger.debug('AdminUI: трей-иконка создана')
+
+    def show_and_raise(self):
+        """Показать окно и поднять на передний план."""
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     # ── Подключение ─────────────────────────────────────────────────
+
+    def _discover_servers(self):
+        """Найти серверы AppMonitor в локальной сети через mDNS."""
+        try:
+            from zeroconf import Zeroconf, ServiceBrowser, ServiceListener
+
+            class _Listener(ServiceListener):
+                def __init__(self, callback):
+                    self.callback = callback
+                    self.found = []
+
+                def add_service(self, zc, type_, name):
+                    info = zc.get_service_info(type_, name)
+                    if info:
+                        addr = ".".join(str(b) for b in info.addresses[0])
+                        port = info.port
+                        hostname = info.properties.get(b"hostname", b"unknown").decode()
+                        self.found.append({"address": f"{addr}:{port}", "hostname": hostname})
+
+                def remove_service(self, zc, type_, name):
+                    pass
+
+                def update_service(self, zc, type_, name):
+                    pass
+
+            listener = _Listener(None)
+            zeroconf = Zeroconf()
+            browser = ServiceBrowser(zeroconf, "_appmonitor._tcp.local.", listener)
+
+            # Ждём 2 секунды для сбора ответов
+            import time
+            time.sleep(2)
+            zeroconf.close()
+
+            if listener.found:
+                servers = "\n".join(
+                    f"  {s['hostname']} — http://{s['address']}" for s in listener.found
+                )
+                QMessageBox.information(
+                    self, "Найденные серверы",
+                    f"Обнаружены серверы AppMonitor:\n{servers}\n\n"
+                    f"Адрес подставлен в поле 'Сервер'. Нажмите 'Подключиться'."
+                )
+                # Подставляем первый найденный адрес с протоколом http
+                if listener.found:
+                    self.server_input.setText(f"http://{listener.found[0]['address']}")
+            else:
+                # Если mDNS не сработал, пробуем найти сервер через прямой HTTP-запрос
+                self._discover_by_scan()
+        except ImportError:
+            self._discover_by_scan()
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Ошибка поиска: {e}")
+
+    def _discover_by_scan(self):
+        """Поиск сервера через прямой HTTP-запрос к /api/status.
+        Сканирует всю подсеть /24 с отображением прогресса.
+        """
+        try:
+            import socket
+            import httpx
+            from PyQt5.QtCore import QThread, pyqtSignal
+
+            class _ScanThread(QThread):
+                found = pyqtSignal(str)
+                progress = pyqtSignal(int, int, str)  # current, total, current_ip
+                finished = pyqtSignal()
+
+                def run(self):
+                    # Получаем свой IP
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.settimeout(0.5)
+                    try:
+                        s.connect(("8.8.8.8", 80))
+                        local_ip = s.getsockname()[0]
+                    except Exception:
+                        local_ip = "127.0.0.1"
+                    s.close()
+
+                    if local_ip == "127.0.0.1":
+                        self.finished.emit()
+                        return
+
+                    prefix = ".".join(local_ip.split(".")[:3])
+                    total = 254
+
+                    for i in range(1, 255):
+                        ip = f"{prefix}.{i}"
+                        try:
+                            url = f"http://{ip}:8765/api/status"
+                            resp = httpx.get(url, timeout=0.3, verify=False)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                if data.get("status") == "ok":
+                                    self.found.emit(f"http://{ip}:8765")
+                                    self.finished.emit()
+                                    return
+                        except Exception:
+                            pass
+                        self.progress.emit(i, total, ip)
+                    self.finished.emit()
+
+            self._scan_thread = _ScanThread()
+
+            # Создаём окно прогресса
+            self._progress = QProgressDialog(
+                "Сканирование локальной сети...", "Отмена", 0, 254, self
+            )
+            self._progress.setWindowTitle("Поиск сервера")
+            self._progress.setWindowModality(Qt.WindowModal)
+            self._progress.setMinimumDuration(0)
+            self._progress.setValue(0)
+            self._progress.setAutoClose(True)
+            self._progress.setAutoReset(True)
+
+            def on_progress(current: int, total: int, current_ip: str):
+                if self._progress.wasCanceled():
+                    self._scan_thread.terminate()
+                    self._scan_thread.wait()
+                    return
+                self._progress.setValue(current)
+                self._progress.setLabelText(
+                    f"Сканирование... {current}/{total}\n"
+                    f"Проверен адрес {current_ip}"
+                )
+
+            def on_found(address: str):
+                self._progress.close()
+                self._on_server_found(address)
+
+            def on_finished():
+                if not self._progress.wasCanceled():
+                    self._progress.close()
+                    if not hasattr(self, '_server_found') or not self._server_found:
+                        QMessageBox.information(
+                            self, "Поиск серверов",
+                            "Серверы AppMonitor не найдены в локальной сети.\n"
+                            "Убедитесь, что AppMonitor запущен на другом компьютере "
+                            "и они находятся в одной сети."
+                        )
+
+            self._server_found = False
+            self._scan_thread.found.connect(on_found)
+            self._scan_thread.progress.connect(on_progress)
+            self._scan_thread.finished.connect(on_finished)
+            self._scan_thread.start()
+
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Поиск серверов",
+                "Серверы AppMonitor не найдены.\n"
+                "Убедитесь, что AppMonitor запущен на другом компьютере "
+                "и они находятся в одной сети.\n\n"
+                f"Подробнее: {e}"
+            )
+
+    def _show_startup_dialog(self):
+        """Показать диалог выбора при запуске: ввести адрес или найти сервер."""
+        logger.info('AdminUI._show_startup_dialog: показываем диалог выбора')
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Подключение к серверу')
+        dialog.setMinimumWidth(450)
+        layout = QVBoxLayout(dialog)
+
+        layout.addWidget(QLabel('Выберите способ подключения к серверу AppMonitor:'))
+
+        # Ручной ввод
+        manual_group = QGroupBox('Ввести адрес вручную')
+        manual_layout = QVBoxLayout(manual_group)
+        addr_input = QComboBox()
+        addr_input.setEditable(True)
+        addr_input.setInsertPolicy(QComboBox.NoInsert)
+        addr_input.setPlaceholderText('https://IP:порт (например, https://192.168.1.100:8765)')
+        for addr in self._server_history:
+            addr_input.addItem(addr)
+        if self._server_history:
+            addr_input.setCurrentText(self._server_history[0])
+        else:
+            addr_input.setCurrentText('https://localhost:8765')
+        manual_layout.addWidget(addr_input)
+        btn_manual = QPushButton('Подключиться')
+        manual_layout.addWidget(btn_manual)
+        layout.addWidget(manual_group)
+
+        # Поиск в сети
+        search_group = QGroupBox('Найти сервер в локальной сети')
+        search_layout = QVBoxLayout(search_group)
+        btn_search = QPushButton('Найти серверы')
+        search_layout.addWidget(btn_search)
+        layout.addWidget(search_group)
+
+        # Отмена
+        btn_cancel = QPushButton('Отмена')
+        layout.addWidget(btn_cancel)
+
+        def _on_manual():
+            address = addr_input.currentText().strip()
+            if not address:
+                QMessageBox.warning(dialog, 'Ошибка', 'Введите адрес сервера')
+                return
+            if '://' not in address:
+                address = f'http://{address}'
+            dialog.accept()
+            self.server_input.setCurrentText(address)
+            self._connect()
+
+        def _on_search():
+            dialog.accept()
+            self._discover_with_prompt()
+
+        btn_manual.clicked.connect(_on_manual)
+        btn_search.clicked.connect(_on_search)
+        btn_cancel.clicked.connect(dialog.reject)
+
+        dialog.exec_()
+
+    def _discover_with_prompt(self):
+        """Поиск сервера с диалогом: подключиться или искать дальше."""
+        logger.info('AdminUI._discover_with_prompt: начало поиска')
+
+        # Определяем свою подсеть автоматически
+        subnet = self._detect_subnet()
+        if subnet is None:
+            QMessageBox.warning(
+                self, 'Ошибка',
+                'Не удалось определить локальную подсеть.\n'
+                'Введите адрес сервера вручную.'
+            )
+            return
+
+        self._scan_subnet = subnet
+        self._scan_start_ip = 1
+        self._start_scan()
+
+    def _start_scan(self):
+        """Запустить сканирование с self._scan_start_ip в self._scan_subnet."""
+        subnet = self._scan_subnet
+        start_ip = self._scan_start_ip
+
+        try:
+            import socket
+            import httpx
+            from PyQt5.QtCore import QThread, pyqtSignal
+
+            class _ScanThread(QThread):
+                found = pyqtSignal(str)
+                progress = pyqtSignal(int, int, str)  # current, total, current_ip
+                finished = pyqtSignal()
+
+                def __init__(self, subnet_prefix: str, start_ip: int):
+                    super().__init__()
+                    self.subnet_prefix = subnet_prefix
+                    self.start_ip = start_ip
+                    self._canceled = False
+
+                def cancel(self):
+                    self._canceled = True
+
+                def run(self):
+                    total = 254
+                    for i in range(self.start_ip, 255):
+                        if self._canceled:
+                            return
+                        ip = f'{self.subnet_prefix}.{i}'
+                        # Пробуем HTTP, затем HTTPS
+                        for proto in ('http', 'https'):
+                            try:
+                                url = f'{proto}://{ip}:8765/api/status'
+                                resp = httpx.get(url, timeout=0.3, verify=False)
+                                if resp.status_code == 200:
+                                    data = resp.json()
+                                    if data.get('status') == 'ok':
+                                        self.found.emit(f'{proto}://{ip}:8765')
+                                        return
+                            except Exception:
+                                pass
+                        self.progress.emit(i, total, ip)
+                    self.finished.emit()
+
+            self._scan_thread = _ScanThread(subnet, start_ip)
+
+            # Создаём окно прогресса
+            self._progress = QProgressDialog(
+                f'Сканирование {subnet}.1-254...', 'Отмена', 0, 254, self
+            )
+            self._progress.setWindowTitle('Поиск сервера')
+            self._progress.setWindowModality(Qt.WindowModal)
+            self._progress.setMinimumDuration(0)
+            self._progress.setValue(start_ip - 1)
+            self._progress.setAutoClose(True)
+            self._progress.setAutoReset(True)
+
+            def on_progress(current: int, total: int, current_ip: str):
+                if self._progress.wasCanceled():
+                    self._scan_thread.cancel()
+                    self._scan_thread.wait()
+                    self._scan_in_progress = False
+                    return
+                self._progress.setValue(current)
+                self._progress.setLabelText(
+                    f'Сканирование... {current}/{total}\n'
+                    f'Проверен адрес {current_ip}'
+                )
+
+            def on_found(address: str):
+                self._progress.close()
+                self.server_input.setCurrentText(address)
+                # Кастомный диалог с двумя кнопками
+                msg = QMessageBox(self)
+                msg.setWindowTitle('Сервер найден')
+                msg.setText(f'Обнаружен сервер AppMonitor по адресу:\n{address}')
+                btn_connect = msg.addButton('Подключиться', QMessageBox.AcceptRole)
+                btn_search_more = msg.addButton('Искать дальше', QMessageBox.ActionRole)
+                msg.setDefaultButton(btn_connect)
+                msg.exec_()
+
+                if msg.clickedButton() == btn_connect:
+                    self._connect()
+                else:
+                    # Ищем дальше — продолжаем с текущего IP+1
+                    self._scan_start_ip = self._scan_thread.start_ip + 1
+                    self._start_scan()
+
+            def on_finished():
+                if not self._progress.wasCanceled():
+                    self._progress.close()
+                    QMessageBox.information(
+                        self, 'Поиск завершён',
+                        f'Серверы AppMonitor не найдены в подсети {subnet}.0/24.\n'
+                        'Попробуйте указать другой диапазон или ввести адрес вручную.'
+                    )
+
+            self._scan_in_progress = True
+            self._scan_thread.found.connect(on_found)
+            self._scan_thread.progress.connect(on_progress)
+            self._scan_thread.finished.connect(on_finished)
+            self._scan_thread.start()
+
+        except Exception as e:
+            self._scan_in_progress = False
+            logger.error(f'AdminUI._start_scan: ошибка поиска: {e}', exc_info=True)
+            QMessageBox.warning(
+                self, 'Ошибка поиска',
+                f'Не удалось выполнить поиск: {e}'
+            )
+
+    @staticmethod
+    def _detect_subnet() -> str | None:
+        """Определить локальную подсеть (первые 3 октета)."""
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.5)
+            try:
+                s.connect(('8.8.8.8', 80))
+                local_ip = s.getsockname()[0]
+                if local_ip != '127.0.0.1':
+                    return '.'.join(local_ip.split('.')[:3])
+            except Exception:
+                pass
+            s.close()
+        except Exception:
+            pass
+        return None
+
+    def _on_server_found(self, address: str):
+        """Обработчик найденного сервера при ручном сканировании."""
+        self._server_found = True
+        self.server_input.setCurrentText(address)
+        QMessageBox.information(
+            self, "Сервер найден",
+            f"Сервер AppMonitor найден по адресу:\n{address}\n\n"
+            f"Нажмите 'Подключиться' для входа."
+        )
+
+    def _load_server_history(self) -> list[str]:
+        """Загрузить историю серверов из файла."""
+        import json
+        path = os.path.join(os.path.dirname(__file__), '..', 'data', 'server_history.json')
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data[:10]  # не больше 10 записей
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        return []
+
+    def _save_server_address(self, address: str):
+        """Сохранить адрес сервера в историю."""
+        import json
+        path = os.path.join(os.path.dirname(__file__), '..', 'data', 'server_history.json')
+        history = self._load_server_history()
+        # Убираем дубликат, если был
+        if address in history:
+            history.remove(address)
+        # Добавляем в начало
+        history.insert(0, address)
+        # Оставляем не больше 10
+        history = history[:10]
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(history, f, ensure_ascii=False, indent=2)
+            # Обновляем комбобокс
+            self.server_input.clear()
+            for addr in history:
+                self.server_input.addItem(addr)
+            self.server_input.setCurrentText(address)
+        except Exception as e:
+            logger.warning(f'Не удалось сохранить историю серверов: {e}')
 
     def _connect(self):
         """Подключиться к серверу."""
-        address = self.server_input.text().strip()
+        logger.info('AdminUI._connect: начало')
+        address = self.server_input.currentText().strip()
+        logger.info(f'AdminUI._connect: адрес = "{address}"')
         if not address:
             QMessageBox.warning(self, "Ошибка", "Введите адрес сервера")
             return
         if "://" not in address:
             address = f"http://{address}"
+            logger.info(f'AdminUI._connect: добавлен протокол -> {address}')
         self.api = AdminClient(address)
         try:
+            logger.info('AdminUI._connect: запрос статуса...')
             status = self.api.get_status()
+            logger.info(f'AdminUI._connect: статус получен: {status}')
             self.conn_status.setText(
                 f"Подключён (аптайм: {status['uptime_seconds']}с, приложений: {status['monitored_apps']})"
             )
             self.conn_status.setStyleSheet("color: green;")
-            # Авторизация
+            # Авторизация — всегда показываем диалог
+            logger.info('AdminUI._connect: запрос авторизации...')
             if not self._login():
+                logger.warning('AdminUI._connect: авторизация не пройдена')
                 self.api = None
                 self.conn_status.setText("Ошибка авторизации")
                 self.conn_status.setStyleSheet(f"color: {COLOR_DANGER};")
                 return
+            logger.info('AdminUI._connect: авторизация успешна, обновляем данные')
+            # Сохраняем адрес в историю
+            self._save_server_address(address)
             self._refresh_all()
             self._connect_ws()
         except Exception as e:
+            logger.error(f'AdminUI._connect: ошибка: {e}', exc_info=True)
             self.conn_status.setText(f"Ошибка: {e}")
             self.conn_status.setStyleSheet(f"color: {COLOR_DANGER};")
             self.api = None
 
     def _login(self) -> bool:
-        """Запросить логин/пароль."""
+        """Запросить логин/пароль у пользователя."""
+        logger.info('AdminUI._login: показываем диалог входа')
         dialog = _AdminLoginDialog(self)
         if dialog.exec_() != QDialog.Accepted:
+            logger.info('AdminUI._login: пользователь отменил вход')
             return False
-        return self.api.login(dialog.username_input.text(), dialog.password_input.text())
+        username = dialog.username_input.text()
+        logger.info(f'AdminUI._login: попытка входа как "{username}"')
+        result = self.api.login(username, dialog.password_input.text())
+        logger.info(f'AdminUI._login: результат = {result}')
+        return result
 
     def _connect_ws(self):
         """Подключение к WebSocket."""
+        logger.info('AdminUI._connect_ws: начало')
         try:
             class WsWorker(QThread):
                 message_received = pyqtSignal(str)
@@ -296,36 +819,50 @@ class AdminUI(BaseUI):
                     self._running = True
 
                 def run(self):
-                    import websockets
-                    async def _listen():
-                        try:
-                            async with websockets.connect(self.url) as ws:
-                                self.message_received.emit('{"type":"connected"}')
-                                while self._running:
-                                    try:
-                                        msg = await asyncio.wait_for(ws.recv(), timeout=30)
-                                        self.message_received.emit(msg)
-                                    except asyncio.TimeoutError:
-                                        await ws.send(json.dumps({"action": "ping"}))
-                        except Exception as e:
-                            self.message_received.emit(json.dumps({"type": "error", "message": str(e)}))
-                        finally:
-                            self.disconnected.emit()
+                    try:
+                        import websockets
+                        import ssl
+                        async def _listen():
+                            try:
+                                # Создаём SSL-контекст без проверки сертификата
+                                ssl_context = ssl.create_default_context()
+                                ssl_context.check_hostname = False
+                                ssl_context.verify_mode = ssl.CERT_NONE
 
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(_listen())
+                                async with websockets.connect(self.url, ssl=ssl_context) as ws:
+                                    self.message_received.emit('{"type":"connected"}')
+                                    while self._running:
+                                        try:
+                                            msg = await asyncio.wait_for(ws.recv(), timeout=30)
+                                            self.message_received.emit(msg)
+                                        except asyncio.TimeoutError:
+                                            try:
+                                                await ws.send(json.dumps({"action": "ping"}))
+                                            except Exception:
+                                                break
+                            except Exception as e:
+                                logger.warning(f'WebSocket ошибка: {e}')
+                            finally:
+                                self.disconnected.emit()
+
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(_listen())
+                    except ImportError:
+                        logger.debug("websockets не установлен")
 
                 def stop(self):
                     self._running = False
 
             ws_url = f"{self.api.ws_url}/ws"
+            logger.info(f'AdminUI._connect_ws: URL = {ws_url}')
             self._ws_worker = WsWorker(ws_url)
             self._ws_worker.message_received.connect(self._on_ws_message)
             self._ws_worker.disconnected.connect(self._on_ws_disconnected)
             self._ws_worker.start()
-        except ImportError:
-            logger.debug("websockets не установлен, real-time обновления недоступны")
+            logger.info('AdminUI._connect_ws: WebSocket запущен')
+        except Exception as e:
+            logger.warning(f'AdminUI._connect_ws: ошибка создания WebSocket: {e}')
 
     def _on_ws_message(self, raw: str):
         """Обработка сообщения от WebSocket."""
@@ -521,15 +1058,20 @@ class AdminUI(BaseUI):
 
     def _refresh_activity_tab(self):
         """Обновить вкладку активности (через API)."""
+        logger.info(f'AdminUI._refresh_activity_tab: дата={self._current_date}')
         if not self.api:
+            logger.info('AdminUI._refresh_activity_tab: нет api')
             return
         try:
             is_today = (self._current_date == datetime.date.today().isoformat())
+            logger.info(f'AdminUI._refresh_activity_tab: is_today={is_today}')
             if is_today:
                 activity = self.api.get_today_activity()
             else:
                 activity = self.api.get_activity_by_date(self._current_date)
-        except Exception:
+            logger.info(f'AdminUI._refresh_activity_tab: получено {len(activity)} записей')
+        except Exception as e:
+            logger.error(f'AdminUI._refresh_activity_tab: ошибка получения: {e}', exc_info=True)
             return
 
         limits = {l.get('system_id', '').lower(): l for l in self.fetch_limits()}
@@ -545,11 +1087,6 @@ class AdminUI(BaseUI):
             name_item.setForeground(QColor('#000000'))
             self.activity_table.setItem(i, 1, name_item)
 
-            # В колонку 2 (Окно) ставим прочерк — через API нет данных об окнах
-            title_item = QTableWidgetItem('—')
-            title_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
-            self.activity_table.setItem(i, 2, title_item)
-
             hours = item['duration_seconds'] // 3600
             minutes = (item['duration_seconds'] % 3600) // 60
             secs = item['duration_seconds'] % 60
@@ -557,9 +1094,25 @@ class AdminUI(BaseUI):
             time_item = QTableWidgetItem(time_str)
             time_item.setTextAlignment(Qt.AlignCenter)
             time_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
-            self.activity_table.setItem(i, 3, time_item)
+            self.activity_table.setItem(i, 2, time_item)
 
             limit = limits.get(sys_id)
+            limit_item = QTableWidgetItem()
+            if limit and limit['enabled']:
+                exceeded = item['duration_seconds'] // 60 >= limit['limit_minutes']
+                limit_str = f'{limit["limit_minutes"]} мин'
+                if exceeded:
+                    limit_str += ' ⚠'
+                    limit_item.setForeground(QColor(COLOR_DANGER))
+                else:
+                    limit_item.setForeground(QColor('#107c10'))
+            else:
+                limit_str = '—'
+                limit_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
+            limit_item.setText(limit_str)
+            limit_item.setTextAlignment(Qt.AlignCenter)
+            self.activity_table.setItem(i, 3, limit_item)
+
             if limit and limit['enabled'] and item['duration_seconds'] // 60 >= limit['limit_minutes']:
                 bg = QColor('#fde7e9')
             else:
@@ -595,10 +1148,38 @@ class AdminUI(BaseUI):
         if not self.api:
             QMessageBox.warning(self, "Ошибка", "Сначала подключитесь к серверу")
             return
-        from ui.admin_ui import AdminSettingsDialog
         dialog = AdminSettingsDialog(self.api, self)
         dialog.exec_()
         self._refresh_all()
+
+    def _open_stats(self):
+        """Открыть окно статистики (через API)."""
+        if not self.api:
+            QMessageBox.warning(self, "Ошибка", "Сначала подключитесь к серверу")
+            return
+        from ui.dialogs.stats_dialog import StatsDialog
+        dialog = StatsDialog(self, self)
+        dialog.exec_()
+
+    def _refresh_all(self):
+        """Обновить все вкладки с учётом выбранной даты."""
+        logger.info('AdminUI._refresh_all: начало')
+        if not self.api:
+            logger.info('AdminUI._refresh_all: нет api, пропускаем')
+            return
+        try:
+            self._refresh_activity_tab()
+        except Exception as e:
+            logger.error(f'Ошибка обновления активности: {e}', exc_info=True)
+        try:
+            self._refresh_tracked_tab()
+        except Exception as e:
+            logger.error(f'Ошибка обновления отслеживаемых: {e}', exc_info=True)
+        try:
+            self._refresh_excluded_tab()
+        except Exception as e:
+            logger.error(f'Ошибка обновления исключений: {e}', exc_info=True)
+        logger.info('AdminUI._refresh_all: завершено')
 
     # ── Очистка ─────────────────────────────────────────────────────
 

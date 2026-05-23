@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from core.database import Database
 from ui.styles import global_style
-from ui.breadcrumbs import breadcrumb_title, component_tooltip
+
 
 
 class AddLimitDialog(QDialog):
@@ -19,8 +19,7 @@ class AddLimitDialog(QDialog):
         self.db = db
         self.app_name = preset_app
         self.limit_minutes = 60
-        self.setWindowTitle(breadcrumb_title(title))
-        self.setToolTip(component_tooltip(self))
+        self.setWindowTitle(title)
         self.setFixedSize(380, 200)
         self.setStyleSheet(global_style())
         layout = QVBoxLayout(self)
@@ -125,8 +124,7 @@ class EditLimitDialog(QDialog):
         self.limit_minutes = limit_data['limit_minutes']
         self.enabled = bool(limit_data['enabled'])
 
-        self.setWindowTitle(breadcrumb_title(f'Редактировать: {self.app_name}'))
-        self.setToolTip(component_tooltip(self))
+        self.setWindowTitle(f'Редактировать: {self.app_name}')
         self.setFixedSize(360, 240)
         self.setStyleSheet(global_style())
         layout = QVBoxLayout(self)

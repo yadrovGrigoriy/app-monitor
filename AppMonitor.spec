@@ -1,60 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-Spec-файл для сборки AppMonitor через PyInstaller.
-Запуск: pyinstaller appmonitor.spec
-"""
 
-import os
-import sys
-from pathlib import Path
-
-# В .spec файле нет __file__, используем os.getcwd()
-PROJECT_ROOT = Path(os.getcwd()).resolve()
-APP_NAME = 'AppMonitor'
 
 a = Analysis(
-    [str(PROJECT_ROOT / 'main.py')],
-    pathex=[str(PROJECT_ROOT)],
+    ['run_app.py'],
+    pathex=[],
     binaries=[],
-    datas=[
-        (str(PROJECT_ROOT / 'data'), 'data'),
-    ],
-    hiddenimports=[
-        'PyQt5.QtCore',
-        'PyQt5.QtGui',
-        'PyQt5.QtWidgets',
-        'PyQt5.QtSvg',
-        'win32api',
-        'win32event',
-        'win32security',
-        'win32gui',
-        'win32con',
-        'winerror',
-        'ntsecuritycon',
-        'psutil',
-        'schedule',
-        'fastapi',
-        'uvicorn',
-        'uvicorn.logging',
-        'uvicorn.loops',
-        'uvicorn.loops.auto',
-        'uvicorn.protocols',
-        'uvicorn.protocols.http',
-        'uvicorn.protocols.http.auto',
-        'uvicorn.protocols.websockets',
-        'uvicorn.protocols.websockets.auto',
-        'httpx',
-        'pydantic',
-        'asyncio',
-        'ctypes',
-        'smtplib',
-        'email.mime.text',
-        'email.mime.multipart',
-        'email.mime.base',
-        'email.encoders',
-        'multiprocessing',
-        'multiprocessing.queues',
-    ],
+    datas=[('data', 'data')],
+    icon='data/appmonitor.ico',
+    hiddenimports=['PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.QtSvg', 'win32api', 'win32event', 'win32file', 'win32pipe', 'win32process', 'win32security', 'win32service', 'win32serviceutil', 'win32timezone', 'winerror', 'pywintypes', 'psutil', 'schedule', 'fastapi', 'uvicorn', 'uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto', 'uvicorn.protocols', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets.auto', 'websockets', 'httpx', 'pydantic', 'cryptography', 'zeroconf', 'matplotlib', 'matplotlib.backends.backend_qt5agg', 'matplotlib.backends.backend_agg', 'matplotlib.backend_bases', 'PIL', 'PIL._imaging', 'PIL._imagingtk', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -62,7 +15,6 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
-
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -71,7 +23,8 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name=APP_NAME,
+    name='AppMonitor',
+    icon='data/appmonitor.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -84,5 +37,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(PROJECT_ROOT / 'app_icon.ico') if (PROJECT_ROOT / 'app_icon.ico').exists() else None,
 )

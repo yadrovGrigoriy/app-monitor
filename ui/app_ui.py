@@ -12,6 +12,7 @@ from PyQt5.QtGui import QColor
 
 from ui.base_ui import BaseUI
 from ui.tray_manager import TrayManager
+from ui.widgets.status_bar import StatusBar
 from ui.styles import global_style, tab_table_style, COLOR_DANGER, COLOR_TEXT_SECONDARY
 from core.database import Database
 from core.auth import AuthManager
@@ -47,6 +48,9 @@ class AppUI(BaseUI):
         self._extensions: dict[str, int] = {}
 
         super().__init__()
+
+        self.status_bar = StatusBar()
+        self._init_status_bar()
 
         self._init_tray()
         self._connect_monitor_signals()
@@ -107,10 +111,10 @@ class AppUI(BaseUI):
                     import win32api
                     exe_path = process.exe()
                     lang, codepage = win32api.GetFileVersionInfo(
-                        exe_path, '\\\\VarFileInfo\\\\Translation'
+                        exe_path, '\\VarFileInfo\\Translation'
                     )[0]
                     file_desc = win32api.GetFileVersionInfo(
-                        exe_path, f'\\\\StringFileInfo\\\\{lang:04X}{codepage:04X}\\\\FileDescription'
+                        exe_path, f'\\StringFileInfo\\{lang:04X}{codepage:04X}\\FileDescription'
                     )
                     if file_desc:
                         display_name = file_desc
@@ -121,7 +125,13 @@ class AppUI(BaseUI):
                 pass
 
         win32gui.EnumWindows(_enum_callback, None)
-        return windows
+        # Группируем по system_id — показываем только одно окно на приложение
+        seen_sys = {}
+        for w in windows:
+            sys_id = w['system_id'].lower()
+            if sys_id not in seen_sys:
+                seen_sys[sys_id] = w
+        return list(seen_sys.values())
 
     def set_limit(self, system_id: str, limit_minutes: int, enabled: bool, app_name: str = ""):
         self.db.set_limit(system_id, limit_minutes, enabled, app_name=app_name)
@@ -174,6 +184,48 @@ class AppUI(BaseUI):
     def refresh_excluded_cache(self):
         if self._monitor:
             self._monitor._refresh_excluded_cache()
+
+    # ── Панель состояния ──────────────────────────────────────────
+
+    def _init_status_bar(self):
+        """Инициализировать панель состояния."""
+        self.status_bar_layout.addWidget(self.status_bar)
+        # Статус сервера — по умолчанию запущен
+        self.status_bar.set_server_status(True, '0.0.0.0', 8765)
+        # Статус мониторинга
+        running = self._monitor is not None and self._monitor._running
+        self.status_bar.set_monitor_status(running)
+        # Локальный IP
+        self.status_bar.set_local_ip(self._get_local_ip())
+        # Таймер обновления статуса
+        self._status_timer = QTimer(self)
+        self._status_timer.timeout.connect(self._tick_status)
+        self._status_timer.start(5000)
+
+    def _get_local_ip(self) -> str:
+        """Получить локальный IP-адрес."""
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.1)
+            s.connect(('10.254.254.254', 1))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return '127.0.0.1'
+
+    def _tick_status(self):
+        """Обновить статусы на панели."""
+        # Мониторинг
+        running = self._monitor is not None and self._monitor._running
+        apps_count = 0
+        if running:
+            try:
+                apps_count = len(self.fetch_open_windows())
+            except Exception:
+                pass
+        self.status_bar.set_monitor_status(running, apps_count)
 
     # ── Трей ────────────────────────────────────────────────────────
 
@@ -247,16 +299,13 @@ class AppUI(BaseUI):
             duration = row_data.get('total_seconds', 0)
 
             sys_item = QTableWidgetItem(w['system_id'])
-            sys_item.setForeground(QColor('#000000'))
+            sys_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
             self.activity_table.setItem(i, 0, sys_item)
 
-            name_item = QTableWidgetItem(w['display_name'])
-            name_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
+            app_name = row_data.get('app_name', '') or w['display_name']
+            name_item = QTableWidgetItem(app_name)
+            name_item.setForeground(QColor('#000000'))
             self.activity_table.setItem(i, 1, name_item)
-
-            title_item = QTableWidgetItem(w['title'])
-            title_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
-            self.activity_table.setItem(i, 2, title_item)
 
             hours = duration // 3600
             minutes = (duration % 3600) // 60
@@ -265,9 +314,25 @@ class AppUI(BaseUI):
             time_item = QTableWidgetItem(time_str)
             time_item.setTextAlignment(Qt.AlignCenter)
             time_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
-            self.activity_table.setItem(i, 3, time_item)
+            self.activity_table.setItem(i, 2, time_item)
 
             limit = limits_by_sys.get(sys_id_lower)
+            limit_item = QTableWidgetItem()
+            if limit and limit['enabled']:
+                exceeded = duration // 60 >= limit['limit_minutes']
+                limit_str = f'{limit["limit_minutes"]} мин'
+                if exceeded:
+                    limit_str += ' ⚠'
+                    limit_item.setForeground(QColor(COLOR_DANGER))
+                else:
+                    limit_item.setForeground(QColor('#107c10'))
+            else:
+                limit_str = '—'
+                limit_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
+            limit_item.setText(limit_str)
+            limit_item.setTextAlignment(Qt.AlignCenter)
+            self.activity_table.setItem(i, 3, limit_item)
+
             if limit and limit['enabled'] and duration // 60 >= limit['limit_minutes']:
                 bg_color = QColor('#fde7e9')
             elif is_tracked:
