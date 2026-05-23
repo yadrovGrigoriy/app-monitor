@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt, QTimer, QDate
 from PyQt5.QtGui import QColor, QCursor
 from PyQt5.QtWidgets import QMenu, QAction
 from core.database import Database
-from ui.widgets.date_toolbar import DateToolbar
+from core.role_manager import RoleManager, ROLE_ADMIN, ROLE_USER
 from ui.widgets.activity_table import ActivityTable
 from ui.widgets.tracked_table import TrackedTable
 from ui.widgets.bottom_bar import BottomBar
@@ -16,30 +16,13 @@ from ui.tray_manager import TrayManager
 from ui.dialogs.settings_dialog import SettingsDialog
 from ui.dialogs.limit_dialog import AddLimitDialog
 from ui.dialogs.stats_dialog import StatsDialog
-from ui.styles import MAIN_WINDOW_INPUT_STYLE, COLOR_DANGER
+from ui.styles import global_style, tab_table_style, COLOR_DANGER
 from ui.breadcrumbs import breadcrumb_title, component_tooltip
 from core.logger import setup_logger
 
 logger = setup_logger('ui.main_window')
 
 COLOR_TEXT_SECONDARY = "#616161"
-
-STYLE_TAB_TABLE = """
-    QTableWidget {
-        border: 1px solid #e0e0e0;
-        border-radius: 6px;
-        font-size: 13px;
-    }
-    QTableWidget::item {
-        padding: 6px 12px;
-    }
-    QHeaderView::section {
-        font-weight: 600;
-        padding: 6px 12px;
-        border: none;
-        border-bottom: 1px solid #e0e0e0;
-    }
-"""
 
 
 class MainWindow(QMainWindow):
@@ -54,6 +37,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = db
         self._monitor = monitor
+        self._role_manager = RoleManager(db)
+        # При старте — режим User, пока не авторизуется администратор
+        self._role_manager.set_role(ROLE_USER)
         self._settings_authorized = True
         self._notified_warning: set[str] = set()
         self._last_exceeded_notify: dict[str, datetime.datetime] = {}
@@ -64,13 +50,14 @@ class MainWindow(QMainWindow):
         self._init_timer()
         self._init_active_timer()
         self._connect_monitor_signals()
+        self._apply_role_restrictions()
 
     def _init_ui(self):
         logger.debug('Инициализация UI')
         self.setWindowTitle(breadcrumb_title('Главная'))
         self.setMinimumSize(720, 500)
         self.resize(900, 600)
-        self.setStyleSheet(MAIN_WINDOW_INPUT_STYLE)
+        self.setStyleSheet(global_style())
 
         central = QWidget()
         central.setToolTip(component_tooltip(self))
@@ -78,12 +65,6 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(24, 16, 24, 16)
         layout.setSpacing(12)
-
-        # Панель даты
-        self.date_toolbar = DateToolbar()
-        self.date_toolbar.date_changed.connect(self._on_date_changed)
-        self.date_toolbar.period_changed.connect(self._on_period_changed)
-        layout.addWidget(self.date_toolbar)
 
         # Вкладки
         self.tabs = QTabWidget()
@@ -105,7 +86,7 @@ class MainWindow(QMainWindow):
         self.open_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.open_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.open_table.verticalHeader().setVisible(False)
-        self.open_table.setStyleSheet(STYLE_TAB_TABLE)
+        self.open_table.setStyleSheet(tab_table_style())
         self.open_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.open_table.customContextMenuRequested.connect(self._on_open_context_menu)
         self.open_table.cellDoubleClicked.connect(self._on_open_double_click)
@@ -139,16 +120,15 @@ class MainWindow(QMainWindow):
         self.excluded_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.excluded_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.excluded_table.verticalHeader().setVisible(False)
-        self.excluded_table.setStyleSheet(STYLE_TAB_TABLE)
+        self.excluded_table.setStyleSheet(tab_table_style())
         self.excluded_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.excluded_table.customContextMenuRequested.connect(self._on_excluded_context_menu)
         excluded_layout.addWidget(self.excluded_table, stretch=1)
 
         btn_row = QHBoxLayout()
-        btn_add_exclude = QPushButton('Добавить исключение')
-        btn_add_exclude.setFixedHeight(32)
-        btn_add_exclude.clicked.connect(self._add_exclude_dialog)
-        btn_row.addWidget(btn_add_exclude)
+        self.btn_add_exclude = QPushButton('Добавить исключение')
+        self.btn_add_exclude.clicked.connect(self._add_exclude_dialog)
+        btn_row.addWidget(self.btn_add_exclude)
         btn_row.addStretch()
         excluded_layout.addLayout(btn_row)
 
@@ -159,6 +139,7 @@ class MainWindow(QMainWindow):
         self.bottom_bar.settings_clicked.connect(self._open_settings)
         self.bottom_bar.stats_clicked.connect(self._open_stats)
         self.bottom_bar.refresh_clicked.connect(self._refresh_all)
+        self.bottom_bar.auth_clicked.connect(self._open_auth_dialog)
         layout.addWidget(self.bottom_bar)
 
         logger.debug('UI инициализирован')
@@ -191,13 +172,7 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
-    def _on_date_changed(self, qdate: QDate):
-        self._refresh_tracked_tab()
-
-    def _on_period_changed(self, period: str):
-        self._refresh_tracked_tab()
-
-    # ── Открытые приложения ─────────────────────────────────────────
+    # ── Открытые приложения
 
     def _get_open_windows(self) -> list[dict]:
         """Вернуть список открытых окон, исключая исключённые приложения."""
@@ -267,37 +242,50 @@ class MainWindow(QMainWindow):
 
     def _tick_active_app(self):
         """Каждую секунду обновлять время на активной вкладке."""
-        current = self.tabs.currentIndex()
-        if current == 0:
-            # Вкладка «Открытые приложения» — обновляем время для всех строк
-            for row in range(self.open_table.rowCount()):
-                sys_item = self.open_table.item(row, 0)
-                if sys_item:
-                    self._update_open_tab_time_for(sys_item.text().lower())
-        elif current == 1:
-            # Вкладка «Отслеживаются» — обновляем время для всех строк
-            for row in range(self.tracked_table.rowCount()):
-                sys_item = self.tracked_table.item(row, 0)
-                if sys_item:
-                    self._update_tracked_tab_time_for(row, sys_item.text().lower())
+        try:
+            current = self.tabs.currentIndex()
+            if current == 0:
+                # Вкладка «Открытые приложения» — обновляем время для всех строк
+                for row in range(self.open_table.rowCount()):
+                    sys_item = self.open_table.item(row, 0)
+                    if sys_item:
+                        self._update_open_tab_time_for(sys_item.text().lower())
+            elif current == 1:
+                # Вкладка «Отслеживаются» — обновляем время для всех строк
+                for row in range(self.tracked_table.rowCount()):
+                    sys_item = self.tracked_table.item(row, 0)
+                    if sys_item:
+                        self._update_tracked_tab_time_for(row, sys_item.text().lower())
+        except Exception as e:
+            logger.error(f'Ошибка в _tick_active_app: {e}')
 
     def _update_open_tab_time_for(self, sys_id_lower: str):
         """Обновить отображение времени для конкретного приложения на вкладке 1."""
         today = datetime.date.today().isoformat()
-        conn = self.db._get_connection()
-        try:
-            row = conn.execute(
-                'SELECT duration_seconds FROM activity WHERE date = ? AND LOWER(system_id) = ?',
-                (today, sys_id_lower)
-            ).fetchone()
-            duration = row['duration_seconds'] if row else 0
-        finally:
-            conn.close()
+        app = self.db.get_app_by_system_id(sys_id_lower)
+        if not app:
+            duration = 0
+            app_name = sys_id_lower
+        else:
+            conn = self.db._get_connection()
+            try:
+                row = conn.execute(
+                    'SELECT total_seconds FROM daily_activity WHERE app_id = ? AND date = ?',
+                    (app['id'], today)
+                ).fetchone()
+                duration = row['total_seconds'] if row else 0
+                app_name = app['app_name']
+            finally:
+                conn.close()
 
         hours = duration // 3600
         minutes = (duration % 3600) // 60
         secs = duration % 60
         time_str = f'{hours}:{minutes:02d}:{secs:02d}'
+
+        # Проверяем лимит по system_id
+        limit = self.db.get_limit_by_system_id(sys_id_lower)
+        exceeded = limit and limit['enabled'] and duration // 60 >= limit['limit_minutes']
 
         for row in range(self.open_table.rowCount()):
             item = self.open_table.item(row, 0)
@@ -305,21 +293,37 @@ class MainWindow(QMainWindow):
                 time_item = self.open_table.item(row, 3)
                 if time_item:
                     time_item.setText(time_str)
+                # Обновляем цвет фона
+                if exceeded:
+                    bg = QColor('#fde7e9')
+                elif app and app['is_tracked']:
+                    bg = QColor('#e8f5e9')
+                else:
+                    bg = QColor('#ffffff')
+                for col in range(4):
+                    cell = self.open_table.item(row, col)
+                    if cell:
+                        cell.setBackground(bg)
                 break
 
     def _update_tracked_tab_time_for(self, row: int, system_id: str):
         """Обновить время, лимит и остаток для строки на вкладке «Отслеживаются»."""
         today = datetime.date.today().isoformat()
-        conn = self.db._get_connection()
-        try:
-            row_data = conn.execute(
-                'SELECT duration_seconds, app_name FROM activity WHERE date = ? AND LOWER(system_id) = ?',
-                (today, system_id)
-            ).fetchone()
-            duration = row_data['duration_seconds'] if row_data else 0
-            app_name = row_data['app_name'] if row_data else system_id
-        finally:
-            conn.close()
+        app = self.db.get_app_by_system_id(system_id)
+        if not app:
+            duration = 0
+            app_name = system_id
+        else:
+            conn = self.db._get_connection()
+            try:
+                row_data = conn.execute(
+                    'SELECT total_seconds FROM daily_activity WHERE app_id = ? AND date = ?',
+                    (app['id'], today)
+                ).fetchone()
+                duration = row_data['total_seconds'] if row_data else 0
+                app_name = app['app_name']
+            finally:
+                conn.close()
 
         # Время
         hours = duration // 3600
@@ -331,8 +335,13 @@ class MainWindow(QMainWindow):
             time_item.setText(time_str)
 
         # Лимит и остаток
-        limits = {l['app_name']: l for l in self.db.get_all_limits()}
-        limit = limits.get(app_name)
+        limit = self.db.get_limit_by_system_id(system_id)
+
+        # Определяем цвет фона всей строки
+        if limit and limit['enabled'] and duration // 60 >= limit['limit_minutes']:
+            row_bg = QColor('#fde7e9')
+        else:
+            row_bg = QColor('#ffffff')
 
         # Колонка 3 — лимит
         limit_item = self.tracked_table.item(row, 3)
@@ -342,11 +351,10 @@ class MainWindow(QMainWindow):
             if exceeded:
                 limit_str += ' ⚠'
                 limit_item.setForeground(QColor(COLOR_DANGER))
-                limit_item.setBackground(QColor(COLOR_DANGER + '20'))
             else:
                 limit_item.setForeground(QColor('#107c10'))
-                limit_item.setBackground(QColor('#ffffff'))
             limit_item.setText(limit_str)
+        limit_item.setBackground(row_bg)
 
         # Колонка 4 — остаток
         remaining_item = self.tracked_table.item(row, 4)
@@ -358,34 +366,44 @@ class MainWindow(QMainWindow):
                 remaining_item.setForeground(QColor(COLOR_DANGER))
             else:
                 remaining_item.setForeground(QColor('#107c10'))
+        remaining_item.setBackground(row_bg)
+
+        # Окрашиваем остальные колонки строки
+        for col in range(2):
+            cell = self.tracked_table.item(row, col)
+            if cell:
+                cell.setBackground(row_bg)
 
     def _refresh_open_tab(self):
         """Обновить вкладку открытых приложений."""
         windows = self._get_open_windows()
         today = datetime.date.today().isoformat()
+        # Отслеживаемые — по is_tracked в apps
+        tracked_apps = self.db.get_tracked_apps()
+        tracked_set = {a['system_id'].lower() for a in tracked_apps if a['system_id']}
+        # Лимиты — индексируем по system_id
+        limits_by_sys = {}
+        for l in self.db.get_all_limits():
+            if l.get('system_id'):
+                limits_by_sys[l['system_id'].lower()] = l
+        # Время из daily_activity
         conn = self.db._get_connection()
         try:
-            # Все записи активности за сегодня (для отображения времени)
             activity_rows = conn.execute(
-                'SELECT system_id, duration_seconds FROM activity WHERE date = ? '
-                'AND system_id IS NOT NULL AND system_id != \'\'',
+                'SELECT a.system_id, a.app_name, d.total_seconds '
+                'FROM daily_activity d '
+                'INNER JOIN apps a ON a.id = d.app_id '
+                'WHERE d.date = ? AND d.total_seconds > 0',
                 (today,)
             ).fetchall()
-            activity = {r['system_id'].lower(): r['duration_seconds'] for r in activity_rows}
-            # Только отслеживаемые (для подсветки)
-            tracked_rows = conn.execute(
-                'SELECT system_id FROM activity WHERE date = ? AND is_tracked = 1 '
-                'AND system_id IS NOT NULL AND system_id != \'\'',
-                (today,)
-            ).fetchall()
-            tracked_set = {r['system_id'].lower() for r in tracked_rows}
+            activity = {r['system_id'].lower(): dict(r) for r in activity_rows}
         finally:
             conn.close()
 
         # Сортируем по убыванию времени
         windows_sorted = sorted(
             windows,
-            key=lambda w: activity.get(w['system_id'].lower(), 0),
+            key=lambda w: activity.get(w['system_id'].lower(), {}).get('total_seconds', 0),
             reverse=True
         )
 
@@ -393,7 +411,8 @@ class MainWindow(QMainWindow):
         for i, w in enumerate(windows_sorted):
             sys_id_lower = w['system_id'].lower()
             is_tracked = sys_id_lower in tracked_set
-            duration = activity.get(sys_id_lower, 0)
+            row_data = activity.get(sys_id_lower, {})
+            duration = row_data.get('total_seconds', 0)
 
             sys_item = QTableWidgetItem(w['system_id'])
             sys_item.setForeground(QColor('#000000'))
@@ -408,7 +427,6 @@ class MainWindow(QMainWindow):
             self.open_table.setItem(i, 2, title_item)
 
             # Время — показываем для всех приложений, даже не отслеживаемых
-            # Для отслеживаемых — из БД, для остальных — 0 (будет расти если активно)
             hours = duration // 3600
             minutes = (duration % 3600) // 60
             secs = duration % 60
@@ -418,38 +436,40 @@ class MainWindow(QMainWindow):
             time_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
             self.open_table.setItem(i, 3, time_item)
 
-            # Помечаем отслеживаемые приложения
-            if is_tracked:
-                for col in range(4):
-                    item = self.open_table.item(i, col)
-                    if item:
-                        item.setBackground(QColor('#e8f5e9'))  # светло-зелёный
+            # Определяем цвет фона строки по system_id
+            limit = limits_by_sys.get(sys_id_lower)
+            if limit and limit['enabled'] and duration // 60 >= limit['limit_minutes']:
+                # Лимит превышен — красный
+                bg_color = QColor('#fde7e9')
+            elif is_tracked:
+                # Отслеживаемое — зелёный
+                bg_color = QColor('#e8f5e9')
+            else:
+                bg_color = QColor('#ffffff')
+
+            for col in range(4):
+                item = self.open_table.item(i, col)
+                if item:
+                    item.setBackground(bg_color)
 
         self.open_table.resizeRowsToContents()
         logger.debug(f'Обновление открытых приложений: {len(windows)} окон')
 
     def _on_open_double_click(self, row: int, column: int):
         """По двойному клику — перейти на вкладку отслеживаемых и выделить строку."""
+        if not self._role_manager.is_admin():
+            return
         sys_id_item = self.open_table.item(row, 0)
         if not sys_id_item:
             return
         sys_id = sys_id_item.text()
 
-        # Найти app_name по system_id в activity
-        today = datetime.date.today().isoformat()
-        conn = self.db._get_connection()
-        try:
-            row_data = conn.execute(
-                'SELECT app_name FROM activity WHERE date = ? AND system_id = ?',
-                (today, sys_id)
-            ).fetchone()
-        finally:
-            conn.close()
-
-        if not row_data:
+        # Найти app_name по system_id в apps
+        app = self.db.get_app_by_system_id(sys_id)
+        if not app:
             return
 
-        app_name = row_data['app_name']
+        app_name = app['app_name']
 
         # Переключиться на вкладку отслеживаемых (индекс 1)
         self.tabs.setCurrentIndex(1)
@@ -464,6 +484,8 @@ class MainWindow(QMainWindow):
 
     def _on_open_context_menu(self, pos):
         """Контекстное меню для открытых приложений."""
+        if not self._role_manager.is_admin():
+            return
         row = self.open_table.rowAt(pos.y())
         if row < 0:
             return
@@ -471,16 +493,8 @@ class MainWindow(QMainWindow):
         display_name = self.open_table.item(row, 1).text()
 
         # Проверяем, отслеживается ли приложение
-        today = datetime.date.today().isoformat()
-        conn = self.db._get_connection()
-        try:
-            row_data = conn.execute(
-                'SELECT is_tracked FROM activity WHERE date = ? AND system_id = ?',
-                (today, sys_id)
-            ).fetchone()
-            is_tracked = row_data is not None and row_data['is_tracked'] == 1
-        finally:
-            conn.close()
+        app = self.db.get_app_by_system_id(sys_id)
+        is_tracked = app and app['is_tracked']
 
         menu = QMenu(self)
 
@@ -504,7 +518,7 @@ class MainWindow(QMainWindow):
     def _add_track_from_open(self, system_id: str, display_name: str):
         """Добавить приложение для отслеживания из вкладки открытых приложений."""
         logger.info(f'Добавление для отслеживания: {system_id} ({display_name})')
-        self.db.mark_as_tracked(display_name, system_id)
+        self.db.mark_as_tracked(system_id)
         self._refresh_all()
 
     def _add_limit_from_tracked(self, app_name: str):
@@ -512,7 +526,17 @@ class MainWindow(QMainWindow):
         logger.info(f'Добавление лимита из отслеживаемых: {app_name}')
         dialog = AddLimitDialog(self.db, self, preset_app=app_name)
         if dialog.exec_() == QDialog.Accepted and dialog.app_name:
-            self.db.set_limit(dialog.app_name, dialog.limit_minutes, True)
+            # Находим system_id по app_name
+            app = self.db.get_app_by_system_id(app_name.lower())
+            if not app:
+                # Ищем по app_name среди всех приложений
+                all_apps = self.db.get_all_apps()
+                for a in all_apps:
+                    if a['app_name'].lower() == app_name.lower():
+                        app = a
+                        break
+            system_id = app['system_id'] if app else app_name.lower()
+            self.db.set_limit(system_id, dialog.limit_minutes, True, app_name=dialog.app_name)
             self._refresh_tracked_tab()
 
     def _remove_tracked(self, system_id: str):
@@ -538,7 +562,7 @@ class MainWindow(QMainWindow):
         """Обновить вкладку отслеживаемых приложений."""
         today = datetime.date.today().isoformat()
         items = self.db.get_tracked_activity(today)
-        limits = {l['app_name']: l for l in self.db.get_all_limits()}
+        limits = {l['system_id'].lower(): l for l in self.db.get_all_limits()}
         self.tracked_table.populate(items, limits)
         logger.debug(f'Обновление отслеживаемых: {len(items)} приложений')
 
@@ -569,6 +593,8 @@ class MainWindow(QMainWindow):
 
     def _on_excluded_context_menu(self, pos):
         """Контекстное меню для таблицы исключений."""
+        if not self._role_manager.is_admin():
+            return
         row = self.excluded_table.rowAt(pos.y())
         if row < 0:
             return
@@ -654,10 +680,136 @@ class MainWindow(QMainWindow):
         if self.tray.notifier:
             self.tray.notifier.show_limit_notification(app_name, limit_minutes)
 
+    # ── Авторизация ───────────────────────────────────────────────
+
+    def _open_auth_dialog(self):
+        """Обработчик кнопки авторизации/выхода.
+        Если админ — выйти в режим просмотра.
+        Если нет — открыть диалог входа.
+        """
+        if self._role_manager.is_admin():
+            # Выход из режима админа
+            self._role_manager.set_role(ROLE_USER)
+            self._apply_role_restrictions()
+            self._refresh_all()
+            logger.info('Выход из режима администратора')
+            return
+
+        self._show_login_dialog()
+
+    def _show_login_dialog(self):
+        """Показать диалог авторизации."""
+        from core.auth import AuthManager
+        from ui.dialogs.auth_dialogs import AuthDialog, RegisterDialog
+
+        auth = AuthManager(self.db)
+
+        # Если админ не создан — предложить регистрацию
+        if not self.db.admin_exists():
+            reply = QMessageBox.question(
+                self, "Первый вход",
+                "Администратор не настроен. Создать учётную запись?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+            reg_dialog = RegisterDialog(self)
+            if reg_dialog.exec_() != QDialog.Accepted:
+                return
+
+            username = reg_dialog.username_input.text()
+            password = reg_dialog.password_input.text()
+            if auth.register(username, password):
+                logger.info(f'Создан администратор: {username}')
+                self._role_manager.set_role(ROLE_ADMIN)
+                self._apply_role_restrictions()
+                self._refresh_all()
+            else:
+                QMessageBox.warning(self, "Ошибка", "Не удалось создать администратора")
+            return
+
+        # Показываем диалог входа (до 3 попыток)
+        for attempt in range(3):
+            dialog = AuthDialog(self, attempt)
+            if dialog.exec_() != QDialog.Accepted:
+                return
+
+            username = dialog.username_input.text()
+            password = dialog.password_input.text()
+            if auth.verify_local(username, password):
+                logger.info(f'Локальная авторизация: {username}')
+                self._role_manager.set_role(ROLE_ADMIN)
+                self._apply_role_restrictions()
+                self._refresh_all()
+                return
+
+            QMessageBox.warning(self, "Ошибка", "Неверный логин или пароль")
+
+        logger.warning('3 неудачных попытки входа')
+
+    def _apply_role_restrictions(self):
+        """Применить ограничения в зависимости от текущей роли."""
+        role = self._role_manager.get_role()
+        is_admin = role == ROLE_ADMIN
+
+        # Обновить кнопку авторизации
+        self.bottom_bar.set_auth_state(is_admin)
+
+        if is_admin:
+            # Admin — показываем все вкладки и кнопки
+            self._show_excluded_tab(True)
+            self.bottom_bar.btn_settings.setVisible(True)
+            self.bottom_bar.btn_stats.setVisible(True)
+            # Включаем контекстные меню
+            self.open_table.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.tracked_table.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.excluded_table.setContextMenuPolicy(Qt.CustomContextMenu)
+            # Включаем двойные клики в виджетах
+            try:
+                self.tracked_table.cellDoubleClicked.disconnect()
+            except TypeError:
+                pass
+            self.tracked_table.cellDoubleClicked.connect(
+                self.tracked_table._on_double_click
+            )
+            logger.debug('Роль Admin: полный доступ')
+        else:
+            # User — скрываем вкладку исключений, настройки, статистику
+            self._show_excluded_tab(False)
+            self.bottom_bar.btn_settings.setVisible(False)
+            self.bottom_bar.btn_stats.setVisible(False)
+            # Отключаем контекстные меню (нельзя добавлять/удалять)
+            self.open_table.setContextMenuPolicy(Qt.NoContextMenu)
+            self.tracked_table.setContextMenuPolicy(Qt.NoContextMenu)
+            self.excluded_table.setContextMenuPolicy(Qt.NoContextMenu)
+            # Отключаем двойные клики в виджетах
+            try:
+                self.tracked_table.cellDoubleClicked.disconnect()
+            except TypeError:
+                pass
+            logger.debug('Роль User: только просмотр')
+
+    def _show_excluded_tab(self, visible: bool):
+        """Показать или скрыть вкладку исключений."""
+        idx = self.tabs.indexOf(self.excluded_tab)
+        if idx >= 0:
+            self.tabs.setTabVisible(idx, visible)
+        # Скрываем кнопку добавления исключения для User
+        if hasattr(self, 'btn_add_exclude'):
+            self.btn_add_exclude.setVisible(visible)
+
     def closeEvent(self, event):
         logger.info('Попытка закрытия окна — сворачивание в трей')
         event.ignore()
         self.hide()
+
+    def refresh_styles(self):
+        """Обновить стили при смене темы."""
+        self.setStyleSheet(global_style())
+        self.open_table.setStyleSheet(tab_table_style())
+        self.excluded_table.setStyleSheet(tab_table_style())
+        logger.debug('Стили MainWindow обновлены')
 
     def cleanup(self):
         logger.info('Очистка ресурсов MainWindow')

@@ -1,19 +1,21 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QWidget, QLabel, QLineEdit, QSpinBox, QCheckBox,
+    QWidget, QLabel, QLineEdit, QSpinBox, QCheckBox, QComboBox,
     QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QGroupBox, QFormLayout, QMessageBox,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QFont
+import datetime
 from core.database import Database
 from core.auth import AuthManager
 from core.autostart import AutostartManager
 from core.logger import setup_logger
-from ui.styles import GLOBAL_STYLE, COLOR_DANGER
+from ui.styles import global_style, COLOR_DANGER
 from ui.breadcrumbs import breadcrumb_title, component_tooltip
 from ui.dialogs.auth_dialogs import AuthDialog, RegisterDialog
 from ui.dialogs.limit_dialog import AddLimitDialog, EditLimitDialog
+from ui.theme_manager import THEME_LIGHT, THEME_DARK, THEME_SETTING_KEY, apply_theme
 
 logger = setup_logger('ui.settings')
 
@@ -74,7 +76,7 @@ class SettingsDialog(QDialog):
         self.setToolTip(component_tooltip(self))
         self.setMinimumSize(620, 520)
         self.resize(680, 560)
-        self.setStyleSheet(GLOBAL_STYLE)
+        self.setStyleSheet(global_style())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
@@ -104,29 +106,12 @@ class SettingsDialog(QDialog):
         self.limits_table.setShowGrid(False)
         self.limits_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.limits_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.limits_table.setStyleSheet('''
-            QTableWidget {
-                border: 1px solid #c0c0c0;
-                border-radius: 6px;
-            }
-            QTableWidget::item {
-                padding: 8px 8px;
-            }
-            QHeaderView::section {
-                background-color: #f0f0f0;
-                padding: 6px 8px;
-                border: none;
-                border-bottom: 2px solid #d0d0d0;
-                font-weight: 600;
-            }
-        ''')
         self.limits_table.verticalHeader().setVisible(False)
         self.limits_table.resizeRowsToContents()
         self.limits_table.cellDoubleClicked.connect(self._edit_limit)
         limits_layout.addWidget(self.limits_table, stretch=1)
 
         btn_add_limit = QPushButton('Добавить лимит')
-        btn_add_limit.setFixedHeight(32)
         btn_add_limit.clicked.connect(self._add_limit)
         btn_margin = QHBoxLayout()
         btn_margin.setContentsMargins(0, 0, 0, 4)
@@ -184,6 +169,18 @@ class SettingsDialog(QDialog):
         self.autostart_check.stateChanged.connect(self._on_autostart_changed)
         general_group_layout.addWidget(self.autostart_check)
         general_layout.addWidget(general_group)
+
+        # ── Группа темы ─────────────────────────────────────────────
+        theme_group = QGroupBox('Оформление')
+        theme_layout = QFormLayout(theme_group)
+        theme_layout.setSpacing(6)
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem('Светлая', THEME_LIGHT)
+        self.theme_combo.addItem('Тёмная', THEME_DARK)
+        theme_layout.addRow('Тема:', self.theme_combo)
+
+        general_layout.addWidget(theme_group)
         general_layout.addStretch()
 
         # ── Вкладка исключений ──────────────────────────────────────
@@ -205,29 +202,12 @@ class SettingsDialog(QDialog):
         self.exclude_table.setShowGrid(False)
         self.exclude_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.exclude_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.exclude_table.setStyleSheet('''
-            QTableWidget {
-                border: 1px solid #c0c0c0;
-                border-radius: 6px;
-            }
-            QTableWidget::item {
-                padding: 8px 8px;
-            }
-            QHeaderView::section {
-                background-color: #f0f0f0;
-                padding: 6px 8px;
-                border: none;
-                border-bottom: 2px solid #d0d0d0;
-                font-weight: 600;
-            }
-        ''')
         self.exclude_table.verticalHeader().setVisible(False)
         self.exclude_table.cellDoubleClicked.connect(self._on_exclude_table_click)
         exclude_layout.addWidget(self.exclude_table, stretch=1)
 
         btn_exclude_layout = QHBoxLayout()
         btn_add_exclude = QPushButton('Добавить исключение')
-        btn_add_exclude.setFixedHeight(32)
         btn_add_exclude.clicked.connect(self._add_exclude)
         btn_exclude_layout.addWidget(btn_add_exclude)
         btn_exclude_layout.addStretch()
@@ -237,11 +217,9 @@ class SettingsDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_save = QPushButton('Сохранить')
-        btn_save.setFixedHeight(32)
         btn_save.clicked.connect(self._save_settings)
         btn_layout.addWidget(btn_save)
         btn_cancel = QPushButton('Отмена')
-        btn_cancel.setFixedHeight(32)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
@@ -257,15 +235,17 @@ class SettingsDialog(QDialog):
 
     def _refresh_limits_table(self):
         limits = self.db.get_all_limits()
-        today_activity = self.db.get_today_activity()
-        usage = {a['app_name']: a['duration_seconds'] // 60 for a in today_activity}
+        today_activity = self.db.get_daily_activity(datetime.date.today().isoformat())
+        usage = {a['system_id'].lower(): a['total_seconds'] // 60 for a in today_activity}
+        apps = {a['system_id'].lower(): a for a in self.db.get_all_apps()}
 
         self.limits_table.setRowCount(len(limits))
         for i, limit in enumerate(limits):
+            sys_id = limit['system_id'].lower()
             # Определяем цвет подсветки строки
             row_bg = None
             if limit['enabled']:
-                used = usage.get(limit['app_name'], 0)
+                used = usage.get(sys_id, 0)
                 left = max(0, limit['limit_minutes'] - used)
                 if left == 0:
                     row_bg = QColor('#fde7e9')  # красный — лимит исчерпан
@@ -362,12 +342,28 @@ class SettingsDialog(QDialog):
         dialog = AddLimitDialog(self.db, self)
         if dialog.exec_() == QDialog.Accepted and dialog.app_name:
             logger.info(f'Добавлен лимит: {dialog.app_name}')
-            self.db.set_limit(dialog.app_name, dialog.limit_minutes, True)
+            app = self.db.get_app_by_system_id(dialog.app_name.lower())
+            if not app:
+                all_apps = self.db.get_all_apps()
+                for a in all_apps:
+                    if a['app_name'].lower() == dialog.app_name.lower():
+                        app = a
+                        break
+            system_id = app['system_id'] if app else dialog.app_name.lower()
+            self.db.set_limit(system_id, dialog.limit_minutes, True, app_name=dialog.app_name)
             self._refresh_limits_table()
 
     def _delete_limit(self, app_name: str):
         logger.info(f'Удалён лимит: {app_name}')
-        self.db.delete_limit(app_name)
+        app = self.db.get_app_by_system_id(app_name.lower())
+        if not app:
+            all_apps = self.db.get_all_apps()
+            for a in all_apps:
+                if a['app_name'].lower() == app_name.lower():
+                    app = a
+                    break
+        system_id = app['system_id'] if app else app_name.lower()
+        self.db.delete_limit_by_system_id(system_id)
         self._refresh_limits_table()
 
     def _on_autostart_changed(self, state):
@@ -389,6 +385,17 @@ class SettingsDialog(QDialog):
         self.db.set_setting('smtp_server', self.smtp_server.text())
         self.db.set_setting('smtp_port', str(self.smtp_port.value()))
         self.db.set_setting('report_enabled', '1' if self.report_enabled.isChecked() else '0')
+
+        # Сохраняем тему и применяем её сразу
+        selected_theme = self.theme_combo.currentData()
+        self.db.set_setting(THEME_SETTING_KEY, selected_theme)
+        app = self.window().window().parent()
+        # Ищем QApplication через родительскую цепочку
+        from PyQt5.QtWidgets import QApplication
+        qapp = QApplication.instance()
+        if qapp:
+            apply_theme(qapp, selected_theme)
+
         logger.debug('Настройки сохранены')
         self.accept()
 
@@ -444,5 +451,12 @@ class SettingsDialog(QDialog):
         self.smtp_server.setText(self.db.get_setting('smtp_server', 'smtp.gmail.com'))
         self.smtp_port.setValue(int(self.db.get_setting('smtp_port', '587')))
         self.report_enabled.setChecked(self.db.get_setting('report_enabled', '0') == '1')
+
+        # Загружаем сохранённую тему
+        saved_theme = self.db.get_setting(THEME_SETTING_KEY, THEME_DARK)
+        idx = self.theme_combo.findData(saved_theme)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+
         self._refresh_limits_table()
         self._refresh_exclude_table()

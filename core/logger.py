@@ -3,7 +3,12 @@ import sys
 import os
 from datetime import datetime
 
-LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+# Приоритет: папка рядом с exe (для разработки), иначе %APPDATA%
+_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if not os.access(_base, os.W_OK):
+    _base = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'AppMonitor')
+
+LOG_DIR = os.path.join(_base, 'logs')
 LOG_FILE = os.path.join(LOG_DIR, f'appmonitor_{datetime.now().strftime("%Y%m%d")}.log')
 
 

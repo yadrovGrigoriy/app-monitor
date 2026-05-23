@@ -8,11 +8,16 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from core.database import Database
 from core.auth import AuthManager
 from core.logger import setup_logger
-from api.schemas import ActivityItem, LimitItem, SettingItem, StatusResponse, LoginRequest, LoginResponse
+from api.schemas import (
+    ActivityItem, LimitItem, SettingItem, StatusResponse,
+    LoginRequest, LoginResponse, AppItem, TrackedRequest,
+    PeriodRequest, StatsResponse,
+)
 
 logger = setup_logger('api.server')
 
@@ -37,6 +42,16 @@ class AppMonitorAPI:
             logger.info("API сервер остановлен")
 
         self.app = FastAPI(title="AppMonitor API", version="1.0.0", lifespan=lifespan)
+
+        # CORS — разрешаем доступ с веб-клиентов
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
         self._register_routes()
 
     def _register_routes(self):
@@ -60,7 +75,11 @@ class AppMonitorAPI:
             conn = self.db._get_connection()
             try:
                 rows = conn.execute(
-                    'SELECT * FROM activity WHERE date = ? ORDER BY duration_seconds DESC',
+                    'SELECT a.app_name, a.system_id, d.total_seconds as duration_seconds '
+                    'FROM daily_activity d '
+                    'INNER JOIN apps a ON a.id = d.app_id '
+                    'WHERE d.date = ? AND d.total_seconds > 0 '
+                    'ORDER BY d.total_seconds DESC',
                     (date,)
                 ).fetchall()
                 return [dict(r) for r in rows]
@@ -102,7 +121,7 @@ class AppMonitorAPI:
 
         @app.get("/api/limits/{name}", response_model=LimitItem)
         async def get_limit_by_name(name: str):
-            limit = self.db.get_limit(name)
+            limit = self.db.get_limit_by_system_id(name)
             if not limit:
                 from fastapi import HTTPException
                 raise HTTPException(status_code=404, detail=f"Limit for '{name}' not found")
@@ -111,14 +130,14 @@ class AppMonitorAPI:
         @app.post("/api/limits", response_model=LimitItem)
         async def set_limit(limit: LimitItem, authorization: str = ""):
             _require_auth(authorization)
-            self.db.set_limit(limit.app_name, limit.limit_minutes, limit.enabled)
+            self.db.set_limit(limit.system_id, limit.limit_minutes, limit.enabled, app_name=limit.app_name)
             return limit
 
-        @app.delete("/api/limits/{app_name}")
-        async def delete_limit(app_name: str, authorization: str = ""):
+        @app.delete("/api/limits/{system_id}")
+        async def delete_limit(system_id: str, authorization: str = ""):
             _require_auth(authorization)
-            self.db.delete_limit(app_name)
-            return {"status": "deleted", "app_name": app_name}
+            self.db.delete_limit_by_system_id(system_id)
+            return {"status": "deleted", "system_id": system_id}
 
         @app.get("/api/settings/{key}", response_model=SettingItem)
         async def get_setting(key: str, default: str = ""):
@@ -139,6 +158,62 @@ class AppMonitorAPI:
                 return [dict(r) for r in rows]
             finally:
                 conn.close()
+
+        # ─── Приложения ────────────────────────────────────────────
+        @app.get("/api/apps", response_model=list[AppItem])
+        async def get_all_apps():
+            return self.db.get_all_apps()
+
+        @app.get("/api/apps/tracked", response_model=list[AppItem])
+        async def get_tracked_apps():
+            return self.db.get_tracked_apps()
+
+        @app.post("/api/apps/tracked", response_model=dict)
+        async def set_tracked(req: TrackedRequest, authorization: str = ""):
+            _require_auth(authorization)
+            if req.tracked:
+                self.db.mark_as_tracked(req.system_id)
+            else:
+                self.db.mark_as_untracked(req.system_id)
+            return {"status": "ok", "system_id": req.system_id, "tracked": req.tracked}
+
+        # ─── Статистика за период ──────────────────────────────────
+        @app.post("/api/activity/period", response_model=StatsResponse)
+        async def get_activity_period(req: PeriodRequest):
+            apps = self.db.get_activity_for_period(req.start_date, req.end_date)
+            total = sum(a.get("duration_seconds", 0) for a in apps)
+            return StatsResponse(total_seconds=total, apps=apps)
+
+        @app.post("/api/activity/tracked/period", response_model=StatsResponse)
+        async def get_tracked_activity_period(req: PeriodRequest):
+            apps = self.db.get_tracked_activity_for_period(req.start_date, req.end_date)
+            total = sum(a.get("duration_seconds", 0) for a in apps)
+            return StatsResponse(total_seconds=total, apps=apps)
+
+        @app.get("/api/activity/app/{system_id}")
+        async def get_app_activity(system_id: str, start_date: str = "", end_date: str = ""):
+            if not start_date:
+                start_date = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+            if not end_date:
+                end_date = datetime.date.today().isoformat()
+            return self.db.get_daily_activity_for_app_by_system_id(system_id, start_date, end_date)
+
+        # ─── Исключения ────────────────────────────────────────────
+        @app.get("/api/excluded", response_model=list[AppItem])
+        async def get_excluded_apps():
+            return self.db.get_excluded_apps()
+
+        @app.post("/api/excluded", response_model=dict)
+        async def add_excluded(req: TrackedRequest, authorization: str = ""):
+            _require_auth(authorization)
+            self.db.add_excluded_app(req.system_id)
+            return {"status": "ok", "system_id": req.system_id}
+
+        @app.delete("/api/excluded/{system_id}")
+        async def remove_excluded(system_id: str, authorization: str = ""):
+            _require_auth(authorization)
+            self.db.remove_excluded_app(system_id)
+            return {"status": "deleted", "system_id": system_id}
 
         # ─── WebSocket для real-time обновлений ─────────────────────
         @app.websocket("/ws")
@@ -164,7 +239,11 @@ class AppMonitorAPI:
                         conn = self.db._get_connection()
                         try:
                             rows = conn.execute(
-                                'SELECT * FROM activity WHERE date = ? ORDER BY duration_seconds DESC',
+                                'SELECT a.app_name, a.system_id, d.total_seconds as duration_seconds '
+                                'FROM daily_activity d '
+                                'INNER JOIN apps a ON a.id = d.app_id '
+                                'WHERE d.date = ? AND d.total_seconds > 0 '
+                                'ORDER BY d.total_seconds DESC',
                                 (date,)
                             ).fetchall()
                             await websocket.send_json({

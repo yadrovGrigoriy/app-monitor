@@ -153,7 +153,6 @@ class ActivityMonitor(QObject):
         logger.info('Activity monitor stopped')
 
     def _tick(self):
-        logger.debug('_tick called')
         try:
             import win32gui
             import win32process
@@ -163,9 +162,7 @@ class ActivityMonitor(QObject):
             _, fg_pid = win32process.GetWindowThreadProcessId(fg_hwnd)
             fg_process = psutil.Process(fg_pid)
             fg_app_name, fg_system_id = self._get_app_name(fg_process, fg_title)
-            logger.debug(f'Active window: hwnd={fg_hwnd} title="{fg_title}" pid={fg_pid} app={fg_app_name} sys={fg_system_id}')
             if self._is_excluded(fg_system_id):
-                logger.debug(f'{fg_system_id} is excluded, skipping')
                 fg_app_name = None
         except Exception as e:
             logger.error(f'Failed to get active window: {e}')
@@ -173,7 +170,6 @@ class ActivityMonitor(QObject):
             fg_title = ''
 
         if not fg_app_name:
-            logger.debug('fg_app_name is None, exiting')
             return
 
         # Save +1s to DB and update UI — single connection
@@ -185,8 +181,6 @@ class ActivityMonitor(QObject):
         if now - self._last_notified.get('_last_limit_check', 0) >= 10:
             self._last_notified['_last_limit_check'] = now
             self._check_limits(fg_system_id)
-
-        logger.debug(f'TICK: sys={fg_system_id}')
 
     def _check_limits(self, system_id: str):
         limit = self.db.get_limit_by_system_id(system_id)

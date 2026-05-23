@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from core.database import Database
-from ui.styles import GLOBAL_STYLE
+from ui.styles import global_style
 from ui.breadcrumbs import breadcrumb_title, component_tooltip
 
 
@@ -22,7 +22,7 @@ class AddLimitDialog(QDialog):
         self.setWindowTitle(breadcrumb_title(title))
         self.setToolTip(component_tooltip(self))
         self.setFixedSize(380, 200)
-        self.setStyleSheet(GLOBAL_STYLE)
+        self.setStyleSheet(global_style())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(10)
@@ -36,27 +36,6 @@ class AddLimitDialog(QDialog):
         self.combo = QComboBox()
         self.combo.setEditable(True)
         self.combo.setInsertPolicy(QComboBox.NoInsert)
-        self.combo.setStyleSheet('''
-            QComboBox {
-                padding: 6px 10px;
-                border-radius: 6px;
-                border: 1px solid #c0c0c0;
-                min-height: 24px;
-            }
-            QComboBox:focus {
-                border-color: #0078d4;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 24px;
-                border-left: 1px solid #c0c0c0;
-            }
-            QComboBox QAbstractItemView {
-                border-radius: 6px;
-                padding: 4px;
-            }
-        ''')
         self._load_apps()
         if preset_app:
             idx = self.combo.findText(preset_app, Qt.MatchFlag.MatchContains)
@@ -89,11 +68,9 @@ class AddLimitDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_ok = QPushButton('Добавить')
-        btn_ok.setFixedHeight(32)
         btn_ok.clicked.connect(self._on_ok)
         btn_layout.addWidget(btn_ok)
         btn_cancel = QPushButton('Отмена')
-        btn_cancel.setFixedHeight(32)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
@@ -151,7 +128,7 @@ class EditLimitDialog(QDialog):
         self.setWindowTitle(breadcrumb_title(f'Редактировать: {self.app_name}'))
         self.setToolTip(component_tooltip(self))
         self.setFixedSize(360, 240)
-        self.setStyleSheet(GLOBAL_STYLE)
+        self.setStyleSheet(global_style())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(10)
@@ -191,11 +168,9 @@ class EditLimitDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_save = QPushButton('Сохранить')
-        btn_save.setFixedHeight(32)
         btn_save.clicked.connect(self._on_save)
         btn_layout.addWidget(btn_save)
         btn_cancel = QPushButton('Отмена')
-        btn_cancel.setFixedHeight(32)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
@@ -207,5 +182,13 @@ class EditLimitDialog(QDialog):
             return
         self.limit_minutes = new_minutes
         self.enabled = self.enabled_check.isChecked()
-        self.db.set_limit(self.app_name, self.limit_minutes, self.enabled)
+        app = self.db.get_app_by_system_id(self.app_name.lower())
+        if not app:
+            all_apps = self.db.get_all_apps()
+            for a in all_apps:
+                if a['app_name'].lower() == self.app_name.lower():
+                    app = a
+                    break
+        system_id = app['system_id'] if app else self.app_name.lower()
+        self.db.set_limit(system_id, self.limit_minutes, self.enabled, app_name=self.app_name)
         self.accept()

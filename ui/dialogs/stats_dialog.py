@@ -6,11 +6,12 @@ matplotlib.use('Qt5Agg')
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QComboBox,
-                             QPushButton, QLabel, QWidget, QSizePolicy)
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+                             QPushButton, QLabel, QWidget, QSizePolicy, QCheckBox)
+from PyQt5.QtCore import Qt, QDate
 
 from core.database import Database
+from ui.widgets.date_toolbar import DateToolbar
 from core.logger import setup_logger
 
 logger = setup_logger('ui.stats_dialog')
@@ -37,19 +38,22 @@ class StatsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
 
-        # Верхняя панель с выбором периода
-        top_layout = QHBoxLayout()
-        top_layout.addWidget(QLabel('Период:'))
+        # Панель выбора даты/периода
+        self.date_toolbar = DateToolbar()
+        self.date_toolbar.date_changed.connect(self._build_chart)
+        self.date_toolbar.period_changed.connect(self._build_chart)
+        layout.addWidget(self.date_toolbar)
 
-        self.period_combo = QComboBox()
-        self.period_combo.addItems(['Сегодня', 'Вчера', 'Последние 7 дней', 'Последние 30 дней', 'Текущий месяц'])
-        self.period_combo.currentIndexChanged.connect(self._build_chart)
-        top_layout.addWidget(self.period_combo)
+        # Верхняя панель с доп. опциями
+        top_layout = QHBoxLayout()
+
+        self.tracked_only_check = QCheckBox('Только отслеживаемые')
+        self.tracked_only_check.stateChanged.connect(self._build_chart)
+        top_layout.addWidget(self.tracked_only_check)
 
         top_layout.addStretch()
 
         btn_close = QPushButton('Закрыть')
-        btn_close.setFixedHeight(32)
         btn_close.clicked.connect(self.accept)
         top_layout.addWidget(btn_close)
 
@@ -65,31 +69,38 @@ class StatsDialog(QDialog):
     def _get_date_range(self) -> tuple[str, str]:
         """Вернуть (start_date, end_date) в ISO-формате в зависимости от выбранного периода."""
         today = datetime.date.today()
-        idx = self.period_combo.currentIndex()
+        period = self.date_toolbar.current_period()
+        selected = self.date_toolbar.selected_date()
+        selected_date = datetime.date(selected.year(), selected.month(), selected.day())
 
-        if idx == 0:  # Сегодня
-            return today.isoformat(), today.isoformat()
-        elif idx == 1:  # Вчера
-            yesterday = today - datetime.timedelta(days=1)
-            return yesterday.isoformat(), yesterday.isoformat()
-        elif idx == 2:  # Последние 7 дней
-            start = today - datetime.timedelta(days=6)
-            return start.isoformat(), today.isoformat()
-        elif idx == 3:  # Последние 30 дней
-            start = today - datetime.timedelta(days=29)
-            return start.isoformat(), today.isoformat()
-        else:  # Текущий месяц
-            start = today.replace(day=1)
-            return start.isoformat(), today.isoformat()
+        if period == 'day':
+            return selected_date.isoformat(), selected_date.isoformat()
+        elif period == 'week':
+            start = selected_date - datetime.timedelta(days=selected_date.weekday())
+            end = start + datetime.timedelta(days=6)
+            return start.isoformat(), end.isoformat()
+        elif period == 'month':
+            start = selected_date.replace(day=1)
+            if selected_date.month == 12:
+                end = selected_date.replace(year=selected_date.year + 1, month=1, day=1) - datetime.timedelta(days=1)
+            else:
+                end = selected_date.replace(month=selected_date.month + 1, day=1) - datetime.timedelta(days=1)
+            return start.isoformat(), end.isoformat()
+        else:  # year
+            start = selected_date.replace(month=1, day=1)
+            end = selected_date.replace(month=12, day=31)
+            return start.isoformat(), end.isoformat()
 
     def _get_daily_data(self, start_date: str, end_date: str) -> list[dict]:
         """Получить активность с группировкой по дням."""
         conn = self.db._get_connection()
         try:
             rows = conn.execute(
-                'SELECT date, app_name, SUM(duration_seconds) as duration_seconds '
-                'FROM activity WHERE date >= ? AND date <= ? '
-                'GROUP BY date, app_name ORDER BY date',
+                'SELECT d.date, a.app_name, d.total_seconds as duration_seconds '
+                'FROM daily_activity d '
+                'INNER JOIN apps a ON a.id = d.app_id '
+                'WHERE d.date >= ? AND d.date <= ? '
+                'ORDER BY d.date',
                 (start_date, end_date)
             ).fetchall()
             return [dict(r) for r in rows]
@@ -101,8 +112,12 @@ class StatsDialog(QDialog):
         start_date, end_date = self._get_date_range()
         logger.debug(f'Построение графика за период: {start_date} — {end_date}')
 
-        # Получаем агрегированные данные по приложениям за период
-        activity = self.db.get_activity_for_period(start_date, end_date)
+        # Получаем данные: все приложения или только отслеживаемые
+        tracked_only = self.tracked_only_check.isChecked()
+        if tracked_only:
+            activity = self.db.get_tracked_activity_for_period(start_date, end_date)
+        else:
+            activity = self.db.get_activity_for_period(start_date, end_date)
 
         self.figure.clear()
         ax = self.figure.add_subplot(111)
@@ -116,24 +131,15 @@ class StatsDialog(QDialog):
             self.canvas.draw()
             return
 
-        # Берём топ-10 приложений, остальные в "Прочее"
-        activity.sort(key=lambda x: x['duration_seconds'], reverse=True)
-        top = activity[:10]
-        other_seconds = sum(x['duration_seconds'] for x in activity[10:])
-
+        # Показываем все приложения (без ограничения топ-10)
         labels = []
         values = []
         colors = []
 
-        for i, item in enumerate(top):
+        for i, item in enumerate(activity):
             labels.append(item['app_name'])
             values.append(item['duration_seconds'] / 60)  # в минутах
             colors.append(COLORS[i % len(COLORS)])
-
-        if other_seconds > 0:
-            labels.append('Прочее')
-            values.append(other_seconds / 60)
-            colors.append(COLORS[-1])
 
         # Столбчатая диаграмма
         bars = ax.bar(range(len(values)), values, color=colors, edgecolor='white', linewidth=0.5)
@@ -153,7 +159,8 @@ class StatsDialog(QDialog):
         ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(labels, rotation=30, ha='right', fontsize=9)
         ax.set_ylabel('Минуты')
-        ax.set_title(f'Активность приложений\n{start_date} — {end_date}', fontsize=12, fontweight='bold')
+        suffix = ' (только отслеживаемые)' if tracked_only else ''
+        ax.set_title(f'Активность приложений{suffix}\n{start_date} — {end_date}', fontsize=12, fontweight='bold', pad=15)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.yaxis.grid(True, alpha=0.3)

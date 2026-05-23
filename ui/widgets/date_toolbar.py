@@ -30,16 +30,6 @@ class DateToolbar(QWidget):
         self.period_combo = QComboBox()
         for value, label in self.PERIODS:
             self.period_combo.addItem(label, value)
-        self.period_combo.setFixedHeight(32)
-        self.period_combo.setStyleSheet('''
-            QComboBox {
-                padding: 4px 12px;
-                border-radius: 6px;
-                border: 1px solid #ccc;
-                font-size: 13px;
-                min-width: 100px;
-            }
-        ''')
         self.period_combo.currentIndexChanged.connect(self._on_period_changed)
         layout.addWidget(self.period_combo)
 
@@ -49,40 +39,9 @@ class DateToolbar(QWidget):
         self.date_picker.setCalendarPopup(True)
         self.date_picker.setDate(QDate.currentDate())
         self.date_picker.dateChanged.connect(self.date_changed)
-        self.date_picker.setStyleSheet('''
-            QDateEdit {
-                padding: 6px 12px;
-                border-radius: 6px;
-                border: 1px solid #ccc;
-                font-size: 13px;
-                min-width: 140px;
-            }
-            QDateEdit:focus {
-                border-color: #0078d4;
-            }
-            QDateEdit::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 24px;
-                border-left: 1px solid #ccc;
-            }
-        ''')
         layout.addWidget(self.date_picker)
 
         btn_today = QPushButton('Сегодня')
-        btn_today.setFixedHeight(32)
-        btn_today.setStyleSheet('''
-            QPushButton {
-                padding: 6px 16px;
-                border-radius: 6px;
-                border: 1px solid #ccc;
-                background: #f5f5f5;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background: #e0e0e0;
-            }
-        ''')
         btn_today.clicked.connect(lambda: self.date_picker.setDate(QDate.currentDate()))
         layout.addWidget(btn_today)
 

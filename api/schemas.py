@@ -4,14 +4,13 @@ from typing import Optional
 
 class ActivityItem(BaseModel):
     app_name: str
-    window_title: Optional[str] = ""
-    date: str
-    duration_seconds: int
-    last_seen: Optional[str] = ""
+    system_id: str = ""
+    duration_seconds: int = 0
 
 
 class LimitItem(BaseModel):
-    app_name: str
+    app_name: str = ""
+    system_id: str = ""
     limit_minutes: int = 60
     enabled: bool = True
 
@@ -35,3 +34,25 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     username: str
+
+
+class AppItem(BaseModel):
+    id: int = 0
+    app_name: str = ""
+    system_id: str = ""
+    is_tracked: bool = False
+
+
+class TrackedRequest(BaseModel):
+    system_id: str
+    tracked: bool = True
+
+
+class PeriodRequest(BaseModel):
+    start_date: str
+    end_date: str
+
+
+class StatsResponse(BaseModel):
+    total_seconds: int = 0
+    apps: list[ActivityItem] = []

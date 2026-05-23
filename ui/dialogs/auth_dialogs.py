@@ -4,8 +4,9 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QMessageBox,
 )
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
-from ui.styles import GLOBAL_STYLE, COLOR_DANGER
+from ui.styles import global_style, COLOR_DANGER
 from ui.breadcrumbs import breadcrumb_title, component_tooltip
 
 
@@ -16,20 +17,13 @@ class AuthDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(breadcrumb_title('Вход'))
         self.setToolTip(component_tooltip(self))
-        self.setFixedSize(380, 220)
-        self.setStyleSheet(GLOBAL_STYLE)
+        # self.setFixedSize(240, 180)
+        self.setStyleSheet(global_style())
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(10)
-
-        title = QLabel('Вход администратора')
-        title_font = QFont('Segoe UI', 12, QFont.Bold)
-        title.setFont(title_font)
-        layout.addWidget(title)
-
+        layout.setSpacing(2)
         if attempt > 0:
             hint = QLabel(f'Попытка {attempt + 1} из 3')
-            hint.setStyleSheet(f"color: {COLOR_DANGER};")
+            hint.setStyleSheet(f'color: {COLOR_DANGER};')
             layout.addWidget(hint)
 
         self.username_input = QLineEdit()
@@ -44,11 +38,9 @@ class AuthDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_ok = QPushButton('Войти')
-        btn_ok.setFixedHeight(32)
         btn_ok.clicked.connect(self.accept)
         btn_layout.addWidget(btn_ok)
         btn_cancel = QPushButton('Отмена')
-        btn_cancel.setFixedHeight(32)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
@@ -62,7 +54,7 @@ class RegisterDialog(QDialog):
         self.setWindowTitle(breadcrumb_title('Регистрация'))
         self.setToolTip(component_tooltip(self))
         self.setFixedSize(400, 300)
-        self.setStyleSheet(GLOBAL_STYLE)
+        self.setStyleSheet(global_style())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(10)
@@ -91,11 +83,9 @@ class RegisterDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_ok = QPushButton('Создать')
-        btn_ok.setFixedHeight(32)
         btn_ok.clicked.connect(self._on_ok)
         btn_layout.addWidget(btn_ok)
         btn_cancel = QPushButton('Отмена')
-        btn_cancel.setFixedHeight(32)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)

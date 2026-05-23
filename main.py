@@ -1,7 +1,9 @@
 import sys
 import os
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from ui.main_window import MainWindow
+from ui.app_ui import AppUI
+from ui.theme_manager import apply_theme, THEME_DARK, THEME_SETTING_KEY
+from ui.app_icon import create_app_icon
 from core.database import Database
 from core.monitor import ActivityMonitor
 from core.autostart import AutostartManager
@@ -103,17 +105,33 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName('AppMonitor')
     app.setApplicationDisplayName('Монитор активности приложений')
+    app.setWindowIcon(create_app_icon())
+
+    # На Windows задаём AppUserModelID, чтобы иконка в панели задач была нашей
+    if os.name == 'nt':
+        try:
+            import ctypes
+            app_id = 'AppMonitor.Monitor.1'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+            logger.debug(f'AppUserModelID установлен: {app_id}')
+        except Exception as e:
+            logger.warning(f'Не удалось установить AppUserModelID: {e}')
     app.setQuitOnLastWindowClosed(False)
     # Блокируем завершение приложения через любые механизмы Qt
     app.aboutToQuit.connect(lambda: None)  # заглушка, чтобы сигнал был занят
+
     logger.info('QApplication создана')
 
     db = Database()
     logger.info('База данных инициализирована')
 
-    # Запуск API-сервера для удалённого доступа (отключён)
-    # api_server = AppMonitorAPI(db, host=API_HOST, port=API_PORT)
-    # api_server.start()
+    # Применяем сохранённую тему (по умолчанию тёмная)
+    saved_theme = db.get_setting(THEME_SETTING_KEY, THEME_DARK)
+    apply_theme(app, saved_theme)
+
+    # Запуск API-сервера для удалённого доступа
+    api_server = AppMonitorAPI(db, host=API_HOST, port=API_PORT)
+    api_server.start()
 
     autostart = AutostartManager()
     if autostart.is_autostart_enabled():
@@ -126,11 +144,14 @@ def main():
     logger.info('Планировщик запущен')
 
     monitor = ActivityMonitor(db)
-    window = MainWindow(db, monitor)
+    window = AppUI(db, monitor)
+    # Явно устанавливаем иконку на окно (для панели задач Windows)
+    window.setWindowIcon(create_app_icon())
     logger.info('Главное окно создано')
 
     monitor.start()
     window._refresh_all()
+    window.show()
 
     logger.info('Вход в цикл событий Qt')
     try:

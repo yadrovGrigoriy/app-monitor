@@ -41,7 +41,10 @@ class EmailReporter:
         conn = self.db._get_connection()
         try:
             rows = conn.execute(
-                'SELECT app_name, duration_seconds FROM activity WHERE date = ? ORDER BY duration_seconds DESC',
+                'SELECT a.app_name, d.total_seconds as duration_seconds '
+                'FROM daily_activity d '
+                'INNER JOIN apps a ON a.id = d.app_id '
+                'WHERE d.date = ? AND d.total_seconds > 0 ORDER BY d.total_seconds DESC',
                 (yesterday,)
             ).fetchall()
         finally:

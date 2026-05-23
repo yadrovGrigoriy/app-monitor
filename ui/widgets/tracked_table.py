@@ -2,28 +2,11 @@ from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QMenu, 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QCursor
 from ui.breadcrumbs import component_tooltip
+from ui.styles import table_style
 
 COLOR_SUCCESS = "#107c10"
 COLOR_DANGER = "#d13438"
 COLOR_TEXT_SECONDARY = "#616161"
-
-STYLE_TABLE = """
-    QTableWidget {
-        font-size: 13px;
-        border-radius: 8px;
-        border: 1px solid #e0e0e0;
-    }
-    QTableWidget::item {
-        padding: 8px 20px;
-        min-height: 28px;
-    }
-    QHeaderView::section {
-        font-weight: 600;
-        padding: 8px 20px;
-        border: none;
-        border-bottom: 1px solid #e0e0e0;
-    }
-"""
 
 
 class TrackedTable(QTableWidget):
@@ -50,7 +33,7 @@ class TrackedTable(QTableWidget):
         self.setAlternatingRowColors(True)
         self.setShowGrid(False)
         self.verticalHeader().setVisible(False)
-        self.setStyleSheet(STYLE_TABLE)
+        self.setStyleSheet(table_style())
         self.verticalHeader().setDefaultSectionSize(40)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
