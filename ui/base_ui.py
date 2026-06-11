@@ -320,23 +320,53 @@ class BaseUI(QMainWindow):
             logger.error(f'Ошибка в _tick_active: {e}')
 
     def _tick_activity_tab(self):
-        """Обновить время на вкладке активности."""
-        today = datetime.date.today().isoformat()
+        """Обновить время на вкладке активности (без HTTP-запросов)."""
         for row in range(self.activity_table.rowCount()):
-            sys_item = self.activity_table.item(row, 0)
-            if sys_item:
-                self._update_activity_row_time(row, sys_item.text().lower(), today)
+            time_item = self.activity_table.item(row, 2)
+            if not time_item:
+                continue
+            current_text = time_item.text()
+            parts = current_text.split(':')
+            if len(parts) == 3:
+                try:
+                    hours = int(parts[0])
+                    minutes = int(parts[1])
+                    secs = int(parts[2]) + 1
+                    if secs >= 60:
+                        secs = 0
+                        minutes += 1
+                        if minutes >= 60:
+                            minutes = 0
+                            hours += 1
+                    time_item.setText(f'{hours}:{minutes:02d}:{secs:02d}')
+                except ValueError:
+                    pass
 
     def _tick_tracked_tab(self):
-        """Обновить время на вкладке отслеживаемых."""
-        today = datetime.date.today().isoformat()
+        """Обновить время на вкладке отслеживаемых (без HTTP-запросов)."""
         for row in range(self.tracked_table.rowCount()):
-            sys_item = self.tracked_table.item(row, 0)
-            if sys_item:
-                self._update_tracked_row_time(row, sys_item.text().lower(), today)
+            time_item = self.tracked_table.item(row, 2)
+            if not time_item:
+                continue
+            current_text = time_item.text()
+            parts = current_text.split(':')
+            if len(parts) == 3:
+                try:
+                    hours = int(parts[0])
+                    minutes = int(parts[1])
+                    secs = int(parts[2]) + 1
+                    if secs >= 60:
+                        secs = 0
+                        minutes += 1
+                        if minutes >= 60:
+                            minutes = 0
+                            hours += 1
+                    time_item.setText(f'{hours}:{minutes:02d}:{secs:02d}')
+                except ValueError:
+                    pass
 
     def _update_activity_row_time(self, row: int, system_id: str, date_iso: str):
-        """Обновить время для строки на вкладке активности."""
+        """Обновить время для строки на вкладке активности (HTTP-запрос)."""
         app = self.get_app_by_system_id(system_id)
         if not app:
             duration = 0
@@ -368,7 +398,7 @@ class BaseUI(QMainWindow):
                 cell.setBackground(bg)
 
     def _update_tracked_row_time(self, row: int, system_id: str, date_iso: str):
-        """Обновить время для строки на вкладке отслеживаемых."""
+        """Обновить время для строки на вкладке отслеживаемых (HTTP-запрос)."""
         app = self.get_app_by_system_id(system_id)
         if not app:
             duration = 0
@@ -596,6 +626,12 @@ class BaseUI(QMainWindow):
         dialog = AddLimitDialog(None, self, preset_app=app_name)
         # Подменяем db на наш адаптер
         dialog.db = self
+        dialog._load_apps()
+        # Восстанавливаем выбранное приложение
+        if app_name:
+            idx = dialog.combo.findText(app_name, Qt.MatchFlag.MatchContains)
+            if idx >= 0:
+                dialog.combo.setCurrentIndex(idx)
         if dialog.exec_() == QDialog.Accepted and dialog.app_name:
             app = self.get_app_by_system_id(app_name.lower())
             if not app:
@@ -666,8 +702,11 @@ class BaseUI(QMainWindow):
         """Открыть окно настроек."""
         logger.info('Открытие окна настроек')
         try:
-            dialog = SettingsDialog(None, self, skip_auth=self._settings_authorized)
-            dialog.db = self
+            db = self.get_db()
+            if db is None:
+                logger.error('Нет доступа к базе данных для настроек')
+                return
+            dialog = SettingsDialog(db, self, skip_auth=self._settings_authorized)
             if dialog.exec_() == QDialog.Accepted:
                 self._refresh_all()
         except Exception as e:
@@ -762,6 +801,10 @@ class BaseUI(QMainWindow):
 
         self.bottom_bar.set_auth_state(is_admin)
 
+        # Обновляем меню в трее
+        if hasattr(self, 'tray') and self.tray:
+            self.tray.set_admin_mode(is_admin)
+
         if is_admin:
             self._show_excluded_tab(True)
             self.bottom_bar.btn_settings.setVisible(True)
@@ -824,8 +867,10 @@ class BaseUI(QMainWindow):
 
     def cleanup(self):
         """Очистка ресурсов."""
-        self._timer.stop()
-        self._active_timer.stop()
+        if hasattr(self, '_timer') and self._timer is not None:
+            self._timer.stop()
+        if hasattr(self, '_active_timer') and self._active_timer is not None:
+            self._active_timer.stop()
         logger.info('Ресурсы очищены')
 
     def closeEvent(self, event):

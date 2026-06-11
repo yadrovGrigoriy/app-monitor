@@ -84,6 +84,70 @@ APPMONITOR_TESTING=0 pytest tests/ -v
 python -m uvicorn api.server:app --host 0.0.0.0 --port 8765
 ```
 
+## Сборка для механизма обновления
+
+Для проверки механизма обновления нужно собрать **3 компонента**:
+
+### 1. AppMonitor.exe (клиентское приложение)
+```bash
+pyinstaller AppMonitor.spec --noconfirm
+```
+Результат: `dist/AppMonitor.exe`
+
+### 2. AppMonitorAdmin.exe (админ-панель)
+```bash
+pyinstaller AppMonitorAdmin.spec --noconfirm
+```
+Результат: `dist/AppMonitorAdmin.exe`
+
+### 3. Установщик AppMonitor_Setup_X.X.X.exe (раздаётся сервером обновлений)
+```bash
+# Требуется NSIS (Nullsoft Scriptable Install System)
+# Установка: winget install NSIS.NSIS
+
+# Сборка установщика:
+"C:\Program Files (x86)\NSIS\makensis.exe" installer\installer.nsi
+```
+Результат: `dist/AppMonitor_Setup_X.X.X.exe`
+
+### Полная сборка одной командой
+```bash
+# PowerShell (из корня проекта):
+pyinstaller AppMonitor.spec --noconfirm
+pyinstaller AppMonitorAdmin.spec --noconfirm
+& "C:\Program Files (x86)\NSIS\makensis.exe" installer\installer.nsi
+```
+
+### Как работает обновление
+
+1. **AppMonitor.exe** (клиент) периодически шлёт запрос на сервер Admin UI (`https://192.168.3.27:8766/api/update/check`)
+2. **Admin Server** (`api/admin_server.py`) ищет установщик в папке `dist/` по шаблону `AppMonitor_Setup_*.exe`
+3. Если версия установщика новее — клиент скачивает его через `/api/update/download/{version}`
+4. Клиент запускает установщик с флагом `/S /AUTORUN` (тихая установка + автозапуск) и завершает себя
+5. Установщик обновляет файлы и запускает свежий `AppMonitor.exe`
+
+**Важно:**
+- Версия приложения задаётся в `core/updater.py` (константа `APP_VERSION`)
+- Версия установщика извлекается из имени файла `AppMonitor_Setup_X.X.X.exe`
+- Admin Server **запускается автоматически** вместе с AdminUI (`python run_admin.py`) на порту 8766 в фоновом потоке
+- Клиент (AppMonitor) обращается к серверу по адресу `https://192.168.3.27:8766`
+- Сертификаты (`data/cert.pem`, `data/key.pem`) нужны для HTTPS
+
+### Автоинкремент версии при сборке
+
+Скрипт `scripts/build_installer.ps1` **автоматически повышает версию** при каждой сборке:
+- Читает текущую версию из `core/updater.py`
+- Увеличивает последнюю цифру (patch) на 1
+- Обновляет версию во всех трёх файлах: `core/updater.py`, `api/admin_server.py`, `installer/installer.nsi`
+- Затем собирает `AppMonitor.exe`, `AppMonitorAdmin.exe` и установщик
+
+Пример: `1.2.1` → `1.2.2` → `1.2.3`
+
+Чтобы собрать установщик с новой версией:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build_installer.ps1
+```
+
 ## Логирование и мониторинг ошибок
 
 - **Логи пишутся в `logs/appmonitor_YYYYMMDD.log`** — файл на каждый день

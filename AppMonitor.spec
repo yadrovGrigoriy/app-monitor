@@ -1,30 +1,85 @@
 # -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec для AppMonitor.exe — клиентское приложение."""
 
+import sys
+from pathlib import Path
+
+block_cipher = None
 
 a = Analysis(
-    ['run_app.py'],
-    pathex=[],
+    ['main.py'],
+    pathex=[r'C:\code\AppMonitor'],
     binaries=[],
-    datas=[('data', 'data')],
-    icon='data/appmonitor.ico',
-    hiddenimports=['PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.QtSvg', 'win32api', 'win32event', 'win32file', 'win32pipe', 'win32process', 'win32security', 'win32service', 'win32serviceutil', 'win32timezone', 'winerror', 'pywintypes', 'psutil', 'schedule', 'fastapi', 'uvicorn', 'uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto', 'uvicorn.protocols', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets.auto', 'websockets', 'httpx', 'pydantic', 'cryptography', 'zeroconf', 'matplotlib', 'matplotlib.backends.backend_qt5agg', 'matplotlib.backends.backend_agg', 'matplotlib.backend_bases', 'PIL', 'PIL._imaging', 'PIL._imagingtk', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont'],
+    datas=[],
+    hiddenimports=[
+        'PyQt5.sip',
+        'qdarktheme',
+        'core.database',
+        'core.auth',
+        'core.monitor',
+        'core.role_manager',
+        'core.limiter',
+        'core.logger',
+        'core.updater',
+        'core.reporter',
+        'core.notifier',
+        'core.scheduler',
+        'core.autostart',
+        'core.self_protect',
+        'ui.app_ui',
+        'ui.base_ui',
+        'ui.theme_manager',
+        'ui.app_icon',
+        'ui.styles',
+        'ui.tray_manager',
+        'ui.breadcrumbs',
+        'ui.main_window',
+        'ui.widgets.activity_table',
+        'ui.widgets.bottom_bar',
+        'ui.widgets.date_toolbar',
+        'ui.widgets.tracked_table',
+        'ui.dialogs.auth_dialogs',
+        'ui.dialogs.limit_dialog',
+        'ui.dialogs.settings_dialog',
+        'ui.dialogs.stats_dialog',
+        'ui.dialogs.update_dialog',
+        'api.server',
+        'api.schemas',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'tkinter',
+        'cv2',
+        'pandas',
+        'scipy',
+        'IPython',
+        'jupyter',
+        'notebook',
+        'setuptools',
+        'pip',
+        'wheel',
+        'pkg_resources',
+        'test',
+        'pytest',
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
     noarchive=False,
-    optimize=0,
 )
-pyz = PYZ(a.pure)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
+    a.zipfiles,
     a.datas,
     [],
     name='AppMonitor',
-    icon='data/appmonitor.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -37,4 +92,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='data/appmonitor.ico',
 )

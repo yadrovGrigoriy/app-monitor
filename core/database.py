@@ -61,6 +61,10 @@ class Database:
                 'CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_activity(date)',
                 'CREATE INDEX IF NOT EXISTS idx_daily_app ON daily_activity(app_id)',
                 'CREATE INDEX IF NOT EXISTS idx_apps_system_id ON apps(system_id)',
+                'CREATE TABLE IF NOT EXISTS appmonitor_uptime ('
+                '  id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                '  date TEXT NOT NULL UNIQUE,'
+                '  total_seconds INTEGER NOT NULL DEFAULT 0)',
             ]
             for stmt in statements:
                 try:
@@ -259,6 +263,43 @@ class Database:
             )
             conn.commit()
             logger.debug(f'Приложение помечено как неотслеживаемое: {system_id}')
+        finally:
+            conn.close()
+
+    # --- Время работы самого AppMonitor ---
+
+    def tick_appmonitor_uptime(self):
+        today = datetime.date.today().isoformat()
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                'INSERT INTO appmonitor_uptime (date, total_seconds) VALUES (?, 1) '
+                'ON CONFLICT(date) DO UPDATE SET total_seconds = total_seconds + 1',
+                (today,)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_appmonitor_uptime(self, date_iso: str) -> int:
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                'SELECT total_seconds FROM appmonitor_uptime WHERE date = ?', (date_iso,)
+            ).fetchone()
+            return row['total_seconds'] if row else 0
+        finally:
+            conn.close()
+
+    def get_appmonitor_uptime_for_period(self, start_date: str, end_date: str) -> int:
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                'SELECT COALESCE(SUM(total_seconds), 0) as total FROM appmonitor_uptime '
+                'WHERE date >= ? AND date <= ?',
+                (start_date, end_date)
+            ).fetchone()
+            return row['total'] if row else 0
         finally:
             conn.close()
 
@@ -667,6 +708,48 @@ class Database:
         try:
             row = conn.execute('SELECT 1 FROM admins LIMIT 1').fetchone()
             return row is not None
+        finally:
+            conn.close()
+
+    def clear_data(self):
+        """Очистить все пользовательские данные, оставить только структуру и дефолтного admin."""
+        conn = self._get_connection()
+        try:
+            conn.execute('DELETE FROM daily_activity')
+            conn.execute('DELETE FROM limits')
+            conn.execute('DELETE FROM apps')
+            conn.execute('DELETE FROM excluded_apps')
+            conn.execute('DELETE FROM settings')
+            conn.execute('DELETE FROM appmonitor_uptime')
+            conn.execute('DELETE FROM admins')
+            conn.commit()
+            logger.info('Все пользовательские данные очищены')
+            self._ensure_default_admin()
+        finally:
+            conn.close()
+
+    def get_all_admins(self) -> list[dict]:
+        """Получить список всех администраторов."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute('SELECT id, username FROM admins').fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def sync_admins(self, admins: list[dict]):
+        """Синхронизировать список администраторов с сервером.
+        Добавляет новых, обновляет существующих, НЕ удаляет локальных.
+        """
+        conn = self._get_connection()
+        try:
+            for a in admins:
+                conn.execute(
+                    'INSERT OR IGNORE INTO admins (username, password_hash) VALUES (?, ?)',
+                    (a['username'], a['password_hash'])
+                )
+            conn.commit()
+            logger.info(f'Администраторы синхронизированы: {len(admins)} записей')
         finally:
             conn.close()
 

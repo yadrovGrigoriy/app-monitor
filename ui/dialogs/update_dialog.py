@@ -202,25 +202,13 @@ class UpdateDialog(QDialog):
 
 
 def _check_updates_background():
-    """Фоновая проверка обновлений (вызывается по таймеру).
+    """Фоновая автоматическая проверка и установка обновлений.
 
-    Если найдено обновление — показывает диалог с предложением установить.
+    Без диалогов и подтверждений — скачивает и устанавливает молча.
     Если сервер недоступен — тихо пропускает.
     """
     try:
-        update_info = check_for_updates()
-        if update_info and update_info.is_newer:
-            from PyQt5.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                None,
-                'Доступно обновление',
-                f'Доступна новая версия AppMonitor v{update_info.latest_version}.\n\n'
-                f'{update_info.release_notes[:200]}...\n\n'
-                f'Открыть диалог обновления?',
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            if reply == QMessageBox.Yes:
-                dialog = UpdateDialog()
-                dialog.exec_()
+        from core.updater import auto_update
+        auto_update()
     except Exception as e:
         logger.debug(f'Фоновая проверка обновлений: {e}')

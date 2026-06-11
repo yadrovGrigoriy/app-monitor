@@ -14,9 +14,48 @@ from ui.admin_ui import AdminUI
 from ui.theme_manager import apply_theme, THEME_LIGHT
 from ui.app_icon import create_admin_icon
 from core.logger import setup_logger
-from core.updater import APP_VERSION, UPDATE_CHECK_INTERVAL_SECONDS
+from core.updater import APP_VERSION
 
 logger = setup_logger('run_admin')
+
+# ── Глобальный перехватчик неперехваченных исключений ──────────────
+def _global_excepthook(exc_type, exc_value, exc_tb):
+    """Логирует все неперехваченные исключения перед падением."""
+    import traceback
+    logger.critical(
+        'НЕПЕРЕХВАЧЕННОЕ ИСКЛЮЧЕНИЕ: %s: %s\n%s',
+        exc_type.__name__, exc_value,
+        ''.join(traceback.format_tb(exc_tb))
+    )
+    # Вызываем оригинальный excepthook для стандартного поведения
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+sys.excepthook = _global_excepthook
+
+# ── Перенаправление stderr в logging ────────────────────────────────
+import logging
+
+class _StderrToLogging:
+    """Перехватывает всё, что пишется в stderr, и направляет в лог."""
+    def __init__(self, logger_: logging.Logger):
+        self._logger = logger_
+        self._in_log = False
+
+    def write(self, message: str):
+        if self._in_log:
+            return
+        message = message.rstrip()
+        if message:
+            self._in_log = True
+            try:
+                self._logger.error('STDERR: %s', message)
+            finally:
+                self._in_log = False
+
+    def flush(self):
+        pass
+
+sys.stderr = _StderrToLogging(logger)
 
 
 def main():
@@ -55,14 +94,8 @@ def main():
     _admin_server_thread.start()
     logger.info('Admin Update Server запущен на порту 8766')
 
-    # Фоновая проверка обновлений (первая через 5 секунд, затем каждые 60)
-    from PyQt5.QtCore import QTimer
-    from ui.dialogs.update_dialog import _check_updates_background
-
-    QTimer.singleShot(5000, _check_updates_background)
-    _update_timer = QTimer()
-    _update_timer.timeout.connect(_check_updates_background)
-    _update_timer.start(UPDATE_CHECK_INTERVAL_SECONDS * 1000)
+    # Фоновая проверка обновлений НЕ запускается — админка сама себе сервер обновлений.
+    # Клиент (AppMonitor.exe) проверяет обновления через HTTPS к этому серверу.
 
     logger.info('Вход в цикл событий Qt')
     try:

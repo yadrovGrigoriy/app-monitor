@@ -143,6 +143,12 @@ class AdminClient:
     def get_app_activity(self, system_id: str, start_date: str, end_date: str) -> list:
         return self._get(f"/api/activity/app/{system_id}?start_date={start_date}&end_date={end_date}")
 
+    def get_admins(self) -> list:
+        return self._get("/api/admins")
+
+    def sync_admins(self, admins: list[dict]):
+        return self._post("/api/admins/sync", admins)
+
 
 class _AdminLoginDialog(QDialog):
     """Диалог входа для удалённого администрирования."""
@@ -208,6 +214,14 @@ class AdminUI(BaseUI):
         logger.info('AdminUI.__init__: поля инициализированы, вызываем super().__init__()')
 
         super().__init__()
+
+    def _init_timer(self):
+        """Админка не обновляется по таймеру — только по WebSocket."""
+        pass
+
+    def _init_active_timer(self):
+        """Админка не тикает локально — показывает данные с сервера."""
+        pass
 
         logger.info('AdminUI.__init__: super() готов, добавляем панели')
         # Устанавливаем иконку окна для панели задач
@@ -386,7 +400,7 @@ class AdminUI(BaseUI):
                 )
                 # Подставляем первый найденный адрес с протоколом http
                 if listener.found:
-                    self.server_input.setText(f"http://{listener.found[0]['address']}")
+                    self.server_input.setCurrentText(f"http://{listener.found[0]['address']}")
             else:
                 # Если mDNS не сработал, пробуем найти сервер через прямой HTTP-запрос
                 self._discover_by_scan()
@@ -429,17 +443,19 @@ class AdminUI(BaseUI):
 
                     for i in range(1, 255):
                         ip = f"{prefix}.{i}"
-                        try:
-                            url = f"http://{ip}:8765/api/status"
-                            resp = httpx.get(url, timeout=0.3, verify=False)
-                            if resp.status_code == 200:
-                                data = resp.json()
-                                if data.get("status") == "ok":
-                                    self.found.emit(f"http://{ip}:8765")
-                                    self.finished.emit()
-                                    return
-                        except Exception:
-                            pass
+                        found = False
+                        for scheme in ("http", "https"):
+                            try:
+                                url = f"{scheme}://{ip}:8765/api/status"
+                                resp = httpx.get(url, timeout=0.3, verify=False)
+                                if resp.status_code == 200:
+                                    data = resp.json()
+                                    if data.get("status") == "ok":
+                                        self.found.emit(f"{scheme}://{ip}:8765")
+                                        self.finished.emit()
+                                        return
+                            except Exception:
+                                pass
                         self.progress.emit(i, total, ip)
                     self.finished.emit()
 
@@ -549,7 +565,7 @@ class AdminUI(BaseUI):
 
         def _on_search():
             dialog.accept()
-            self._discover_with_prompt()
+            self._discover_by_scan()
 
         btn_manual.clicked.connect(_on_manual)
         btn_search.clicked.connect(_on_search)
@@ -620,6 +636,8 @@ class AdminUI(BaseUI):
                         self.progress.emit(i, total, ip)
                     self.finished.emit()
 
+
+
             self._scan_thread = _ScanThread(subnet, start_ip)
 
             # Создаём окно прогресса
@@ -648,6 +666,9 @@ class AdminUI(BaseUI):
             def on_found(address: str):
                 self._progress.close()
                 self.server_input.setCurrentText(address)
+                # Извлекаем IP из адреса для продолжения сканирования
+                found_ip = address.split('://')[1].split(':')[0]
+                found_last_octet = int(found_ip.rsplit('.', 1)[1])
                 # Кастомный диалог с двумя кнопками
                 msg = QMessageBox(self)
                 msg.setWindowTitle('Сервер найден')
@@ -660,8 +681,8 @@ class AdminUI(BaseUI):
                 if msg.clickedButton() == btn_connect:
                     self._connect()
                 else:
-                    # Ищем дальше — продолжаем с текущего IP+1
-                    self._scan_start_ip = self._scan_thread.start_ip + 1
+                    # Ищем дальше — продолжаем с найденного IP+1
+                    self._scan_start_ip = found_last_octet + 1
                     self._start_scan()
 
             def on_finished():
@@ -687,8 +708,7 @@ class AdminUI(BaseUI):
                 f'Не удалось выполнить поиск: {e}'
             )
 
-    @staticmethod
-    def _detect_subnet() -> str | None:
+    def _detect_subnet(self) -> str | None:
         """Определить локальную подсеть (первые 3 октета)."""
         try:
             import socket
@@ -803,7 +823,19 @@ class AdminUI(BaseUI):
         logger.info(f'AdminUI._login: попытка входа как "{username}"')
         result = self.api.login(username, dialog.password_input.text())
         logger.info(f'AdminUI._login: результат = {result}')
+        if result:
+            self._sync_admins()
         return result
+
+    def _sync_admins(self):
+        """Синхронизировать список администраторов с подключённым сервером."""
+        try:
+            remote_admins = self.api.get_admins()
+            if remote_admins:
+                self.api.sync_admins(remote_admins)
+                logger.info(f'Администраторы синхронизированы: {len(remote_admins)}')
+        except Exception as e:
+            logger.warning(f'Ошибка синхронизации администраторов: {e}')
 
     def _connect_ws(self):
         """Подключение к WebSocket."""
@@ -831,13 +863,19 @@ class AdminUI(BaseUI):
 
                                 async with websockets.connect(self.url, ssl=ssl_context) as ws:
                                     self.message_received.emit('{"type":"connected"}')
+                                    # Сразу запрашиваем активность
+                                    try:
+                                        await ws.send(json.dumps({"action": "get_today"}))
+                                    except Exception:
+                                        pass
                                     while self._running:
                                         try:
                                             msg = await asyncio.wait_for(ws.recv(), timeout=30)
                                             self.message_received.emit(msg)
                                         except asyncio.TimeoutError:
                                             try:
-                                                await ws.send(json.dumps({"action": "ping"}))
+                                                # Каждые 10 секунд запрашиваем свежие данные
+                                                await ws.send(json.dumps({"action": "get_today"}))
                                             except Exception:
                                                 break
                             except Exception as e:
@@ -905,7 +943,10 @@ class AdminUI(BaseUI):
         try:
             # Используем API активности за период (один день)
             resp = self.api.get_tracked_activity_period(date_iso, date_iso)
-            return resp.get("apps", [])
+            apps = resp.get("apps", [])
+            for a in apps[:5]:
+                logger.debug(f'  tracked {a.get("app_name","?")}: {a.get("duration_seconds",0)}с')
+            return apps
         except Exception as e:
             logger.warning(f'Ошибка получения отслеживаемых: {e}')
             return []
@@ -1070,6 +1111,8 @@ class AdminUI(BaseUI):
             else:
                 activity = self.api.get_activity_by_date(self._current_date)
             logger.info(f'AdminUI._refresh_activity_tab: получено {len(activity)} записей')
+            for a in activity[:5]:
+                logger.debug(f'  {a.get("app_name","?")}: {a.get("duration_seconds",0)}с')
         except Exception as e:
             logger.error(f'AdminUI._refresh_activity_tab: ошибка получения: {e}', exc_info=True)
             return

@@ -24,7 +24,7 @@ logger = setup_logger('core.updater')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.6"
 
 # Адрес сервера обновлений Admin UI
 ADMIN_SERVER_URL = "https://192.168.3.27:8766"
@@ -242,7 +242,7 @@ def apply_update(installer_path: str) -> None:
 
     try:
         subprocess.Popen(
-            [installer_path, "/S"],
+            [installer_path, "/S", "/AUTORUN"],
             shell=True,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
@@ -263,3 +263,26 @@ def clean_update(installer_path: str | None) -> None:
             logger.debug(f"Временный установщик удалён: {installer_path}")
         except OSError as e:
             logger.warning(f"Не удалось удалить временный файл: {e}")
+
+
+def auto_update() -> bool:
+    """Автоматическая проверка, скачивание и установка обновления.
+
+    Без диалогов и подтверждений пользователя.
+    Если обновление найдено — скачивает и запускает установщик.
+    Возвращает True, если обновление было установлено (процесс завершится).
+    """
+    update_info = check_for_updates()
+    if update_info is None or not update_info.is_newer:
+        return False
+
+    logger.info(f"Автообновление: найдена версия {update_info.latest_version}, скачиваю...")
+
+    installer_path = download_update(update_info)
+    if installer_path is None:
+        logger.error("Автообновление: не удалось скачать установщик")
+        return False
+
+    logger.info(f"Автообновление: установщик скачан, запускаю установку...")
+    apply_update(installer_path)
+    return True

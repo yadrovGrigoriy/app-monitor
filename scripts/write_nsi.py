@@ -1,5 +1,6 @@
-!define PRODUCT_NAME "AppMonitor"
-!define PRODUCT_VERSION "1.2.6"
+# -*- coding: cp1251 -*-
+content = r"""!define PRODUCT_NAME "AppMonitor"
+!define PRODUCT_VERSION "1.2.3"
 !define PRODUCT_PUBLISHER "AppMonitor Team"
 !define PRODUCT_WEB_SITE "https://appmonitor.local"
 !define PRODUCT_DIR "$PROGRAMFILES64\${PRODUCT_NAME}"
@@ -19,7 +20,6 @@ ShowUnInstDetails show
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "..\installer\LICENSE_ANSI.txt"
 !insertmacro MUI_PAGE_DIRECTORY
-!define MUI_PAGE_CUSTOMFUNCTION_SHOW unselectShortcuts
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -38,12 +38,9 @@ Function .onInit
     ${GetOptions} $0 "/AUTORUN" $1
     IfErrors +2
         StrCpy $AUTORUN_FLAG "1"
-FunctionEnd
-
-Function unselectShortcuts
-    SectionSetFlags 1 0
-    SectionSetFlags 2 0
-    SectionSetFlags 3 0
+    SectionSetFlags ${SecStartMenu} 0
+    SectionSetFlags ${SecDesktop} 0
+    SectionSetFlags ${SecAutostart} 0
 FunctionEnd
 
 Section "!Основные файлы" SecCore
@@ -86,7 +83,7 @@ SectionEnd
 Section -PostInstall
     ${If} $AUTORUN_FLAG == "1"
         Sleep 1000
-        Exec "$INSTDIR\AppMonitor.exe"
+        ExecShell "" "$INSTDIR\AppMonitor.exe" "" SW_SHOWNORMAL
     ${EndIf}
 SectionEnd
 
@@ -119,3 +116,8 @@ Section "Uninstall"
         MessageBox MB_YESNO|MB_ICONQUESTION "Удалить папку с настройками ($APPDATA\AppMonitor)?$\n$\nВнимание: будут удалены все данные!" IDNO +2
         RMDir /r "$APPDATA\AppMonitor"
 SectionEnd
+"""
+
+with open('installer/installer.nsi', 'w', encoding='cp1251') as f:
+    f.write(content)
+print('OK')

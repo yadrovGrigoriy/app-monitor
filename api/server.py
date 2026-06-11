@@ -225,6 +225,18 @@ class AppMonitorAPI:
             self.db.remove_excluded_app(system_id)
             return {"status": "deleted", "system_id": system_id}
 
+        # ─── Синхронизация администраторов ─────────────────────────
+        @app.get("/api/admins")
+        async def get_admins(authorization: str = Header("")):
+            _require_auth(authorization)
+            return self.db.get_all_admins()
+
+        @app.post("/api/admins/sync")
+        async def sync_admins(admins: list[dict], authorization: str = Header("")):
+            _require_auth(authorization)
+            self.db.sync_admins(admins)
+            return {"status": "synced", "count": len(admins)}
+
         # ─── WebSocket для real-time обновлений ─────────────────────
         @app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):

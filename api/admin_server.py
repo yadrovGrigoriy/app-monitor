@@ -28,7 +28,7 @@ logger = setup_logger('api.admin_server')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.6"
 APP_NAME = "AppMonitor"
 
 # Путь к папке с установщиками (собираются скриптом build_installer.ps1)
@@ -66,41 +66,84 @@ app = FastAPI(
 
 
 def _find_installer(version: str | None = None) -> Path | None:
-    """Найти установщик в папке dist.
+    """Найти установщик в папке dist или dist/vX.X.X.
 
     Ищет файл по шаблону AppMonitor_Setup_{version}.exe.
+    Сначала в dist/, потом в dist/vX.X.X/.
     Если version не указан — ищет последний по версии.
     """
     if not DIST_DIR.exists():
         logger.warning(f"Папка dist не найдена: {DIST_DIR}")
         return None
 
-    if version:
-        pattern = f"AppMonitor_Setup_{version}.exe"
-        candidate = DIST_DIR / pattern
-        if candidate.exists():
-            return candidate
-        logger.warning(f"Установщик для версии {version} не найден: {candidate}")
-        return None
-
-    # Ищем последний установщик по версии в имени файла
     import re
 
-    best_version = (0, 0, 0)
-    best_path = None
+    def _search_in_dir(directory: Path, ver: str | None) -> Path | None:
+        """Поиск установщика в конкретной папке."""
+        if not directory.exists():
+            return None
 
-    for f in DIST_DIR.glob("AppMonitor_Setup_*.exe"):
-        match = re.search(r"AppMonitor_Setup_([\d.]+)\.exe", f.name)
-        if match:
-            try:
-                ver = tuple(int(x) for x in match.group(1).split("."))
-                if ver > best_version:
-                    best_version = ver
-                    best_path = f
-            except ValueError:
-                continue
+        if ver:
+            candidate = directory / f"AppMonitor_Setup_{ver}.exe"
+            if candidate.exists():
+                return candidate
+            return None
 
-    return best_path
+        # Ищем последний по версии
+        best_version = (0, 0, 0)
+        best_path = None
+
+        for f in directory.glob("AppMonitor_Setup_*.exe"):
+            match = re.search(r"AppMonitor_Setup_([\d.]+)\.exe", f.name)
+            if match:
+                try:
+                    v = tuple(int(x) for x in match.group(1).split("."))
+                    if v > best_version:
+                        best_version = v
+                        best_path = f
+                except ValueError:
+                    continue
+
+        return best_path
+
+    # Сначала ищем в dist/
+    result = _search_in_dir(DIST_DIR, version)
+    if result:
+        return result
+
+    # Если не нашли — ищем в dist/vX.X.X/
+    if version:
+        result = _search_in_dir(DIST_DIR / f"v{version}", version)
+        if result:
+            return result
+    else:
+        # Ищем последнюю версию среди всех папок dist/v*/
+        best_version = (0, 0, 0)
+        best_path = None
+
+        for folder in DIST_DIR.glob("v*/"):
+            match = re.search(r"v([\d.]+)$", folder.name)
+            if match:
+                try:
+                    v = tuple(int(x) for x in match.group(1).split("."))
+                    if v > best_version:
+                        best_version = v
+                        best_path = folder
+                except ValueError:
+                    continue
+
+        if best_path:
+            result = _search_in_dir(best_path, None)
+            if result:
+                return result
+
+        # Если и в папках не нашли — ищем в dist/ ещё раз (на случай если dist/ пуст, а папки есть)
+        result = _search_in_dir(DIST_DIR, None)
+        if result:
+            return result
+
+    logger.warning(f"Установщик{' для версии ' + version if version else ''} не найден")
+    return None
 
 
 def _get_release_notes() -> str:
