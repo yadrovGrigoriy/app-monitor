@@ -1,12 +1,12 @@
 !define PRODUCT_NAME "AppMonitor"
-!define PRODUCT_VERSION "1.2.23"
+!define PRODUCT_VERSION "1.2.24"
 !define PRODUCT_PUBLISHER "AppMonitor Team"
 !define PRODUCT_WEB_SITE "https://appmonitor.local"
 !define PRODUCT_DIR "$PROGRAMFILES64\${PRODUCT_NAME}"
 !define PRODUCT_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
-OutFile "..\dist\v1.2.23\AppMonitor_Setup_${PRODUCT_VERSION}.exe"
+OutFile "..\dist\v1.2.24\AppMonitor_Setup_${PRODUCT_VERSION}.exe"
 InstallDir "${PRODUCT_DIR}"
 InstallDirRegKey HKLM "${PRODUCT_UNINSTALL_KEY}" "InstallDir"
 ShowInstDetails show
@@ -49,7 +49,7 @@ FunctionEnd
 Section "!Основные файлы" SecCore
     SectionIn RO
     SetOutPath "$INSTDIR"
-    File "..\dist\v1.2.23\AppMonitor.exe"
+    File "..\dist\v1.2.24\AppMonitor.exe"
     File /nonfatal "..\data\cert.pem"
     File /nonfatal "..\data\key.pem"
     File "..\LICENSE.txt"

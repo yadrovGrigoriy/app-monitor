@@ -10,6 +10,7 @@
 import sys
 import os
 from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtCore import QTimer
 from ui.app_ui import AppUI
 from ui.theme_manager import apply_theme, THEME_LIGHT, THEME_SETTING_KEY
 from ui.app_icon import create_app_icon
@@ -18,7 +19,7 @@ from core.monitor import ActivityMonitor
 from core.autostart import AutostartManager
 from core.scheduler import DailyScheduler
 from core.updater import APP_VERSION
-from ui.dialogs.update_dialog import _check_updates_background
+
 from api.server import AppMonitorAPI
 from core.logger import setup_logger
 
@@ -184,17 +185,26 @@ def main():
     window._refresh_all()
     window.show()
 
-    # Фоновая проверка обновлений
-    from PyQt5.QtCore import QTimer
-    from core.updater import UPDATE_CHECK_INTERVAL_SECONDS
+    # Фоновая проверка локального обновления (раз в 60 секунд)
+    def _check_local_update():
+        try:
+            from core.updater import check_local_update, APP_VERSION
+            new_ver = check_local_update()
+            if new_ver:
+                logger.info(f'Доступно обновление: v{new_ver}')
+                QMessageBox.information(
+                    window, 'Доступно обновление',
+                    f'Найден установщик версии v{new_ver}.\n'
+                    f'Текущая версия: v{APP_VERSION}.\n\n'
+                    f'Запустите AppMonitor_Setup_{new_ver}.exe для обновления.',
+                )
+        except Exception as e:
+            logger.debug(f'Ошибка проверки обновления: {e}')
 
-    # Первая проверка через 5 секунд после старта
-    QTimer.singleShot(5000, _check_updates_background)
-
-    # Затем проверка каждые UPDATE_CHECK_INTERVAL_SECONDS секунд
+    QTimer.singleShot(5000, _check_local_update)
     _update_timer = QTimer()
-    _update_timer.timeout.connect(_check_updates_background)
-    _update_timer.start(UPDATE_CHECK_INTERVAL_SECONDS * 1000)
+    _update_timer.timeout.connect(_check_local_update)
+    _update_timer.start(60000)
 
     logger.info('Вход в цикл событий Qt')
     try:

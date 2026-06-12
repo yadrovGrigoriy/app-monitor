@@ -6,6 +6,9 @@
 """
 
 import dataclasses
+import glob
+import os
+import sys
 from pathlib import Path
 from core.logger import setup_logger
 
@@ -60,3 +63,27 @@ def _parse_version(version_str: str) -> tuple[int, ...]:
 def is_newer_version(current: str, latest: str) -> bool:
     """Сравнить две версии. Вернуть True, если latest > current."""
     return _parse_version(latest) > _parse_version(current)
+
+
+def check_local_update() -> str | None:
+    """Проверить, есть ли установщик новее текущей версии рядом с exe.
+
+    Ищет файлы AppMonitor_Setup_*.exe в папке с исполняемым файлом.
+    Возвращает версию установщика, если она новее текущей, иначе None.
+    """
+    exe_dir = os.path.dirname(sys.executable)
+    pattern = os.path.join(exe_dir, "AppMonitor_Setup_*.exe")
+    installers = sorted(glob.glob(pattern))
+    if not installers:
+        return None
+
+    latest_installer = installers[-1]
+    fname = os.path.basename(latest_installer)
+    # AppMonitor_Setup_1.2.24.exe -> 1.2.24
+    version_part = fname.replace("AppMonitor_Setup_", "").replace(".exe", "")
+
+    if version_part and is_newer_version(APP_VERSION, version_part):
+        logger.info(f"Найден установщик новее: {fname}")
+        return version_part
+
+    return None
