@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { api, setToken } from '../api'
+import { SafetyCertificateOutlined } from '@ant-design/icons-vue'
 
 const emit = defineEmits(['login-success'])
 
@@ -27,7 +28,7 @@ async function handleLogin() {
   <div class="login-page">
     <a-card class="login-card" :bordered="false">
       <div class="login-header">
-        <div class="login-icon">🛡️</div>
+        <SafetyCertificateOutlined class="login-icon" />
         <h1>AppMonitor Admin</h1>
         <p class="login-subtitle">Вход в панель управления</p>
       </div>
@@ -56,7 +57,7 @@ async function handleLogin() {
 }
 .login-card { width: 380px; max-width: 90vw; }
 .login-header { text-align: center; margin-bottom: 24px; }
-.login-icon { font-size: 48px; margin-bottom: 8px; }
+.login-icon { font-size: 48px; color: #6366f1; margin-bottom: 8px; }
 .login-header h1 { margin: 0; font-size: 22px; }
 .login-subtitle { color: #7a7f94; margin-top: 4px; }
 </style>

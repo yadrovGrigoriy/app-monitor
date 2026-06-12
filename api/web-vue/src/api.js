@@ -14,8 +14,9 @@ export function getToken() {
 
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+  const activeToken = token || localStorage.getItem('token')
+  if (activeToken) {
+    headers['Authorization'] = `Bearer ${activeToken}`
   }
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
   if (res.status === 401) {
@@ -56,9 +57,9 @@ export const api = {
   },
 
   toggleTracking(systemId, tracked) {
-    return request(`/api/apps/${encodeURIComponent(systemId)}/track`, {
-      method: 'PUT',
-      body: JSON.stringify({ is_tracked: tracked }),
+    return request('/api/apps/tracked', {
+      method: 'POST',
+      body: JSON.stringify({ system_id: systemId, tracked: tracked }),
     })
   },
 
@@ -85,6 +86,23 @@ export const api = {
 
   clearAllData() {
     return request('/api/data/clear', {
+      method: 'DELETE',
+    })
+  },
+
+  getExcluded() {
+    return request('/api/excluded')
+  },
+
+  addExcluded(systemId) {
+    return request('/api/excluded', {
+      method: 'POST',
+      body: JSON.stringify({ system_id: systemId }),
+    })
+  },
+
+  removeExcluded(systemId) {
+    return request(`/api/excluded/${encodeURIComponent(systemId)}`, {
       method: 'DELETE',
     })
   },

@@ -19,4 +19,10 @@ const router = createRouter({
   routes,
 })
 
+// Динамический title страницы
+router.afterEach((to) => {
+  const title = to.meta?.title
+  document.title = title ? `AppMonitor — ${title}` : 'AppMonitor Admin'
+})
+
 export default router

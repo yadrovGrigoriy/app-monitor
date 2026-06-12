@@ -1,21 +1,20 @@
 <script setup>
+import { inject } from 'vue'
 import { api } from '../api'
 import { formatUptime } from '../utils'
+import { DeleteOutlined } from '@ant-design/icons-vue'
 
-const props = defineProps({
-  settings: Object,
-  serverStatus: String,
-  uptime: Number,
-  monitoredApps: Number,
-})
-
-const emit = defineEmits(['refresh'])
+const settings = inject('settings')
+const stats = inject('stats')
+const serverStatus = inject('serverStatus')
+const uptime = inject('uptime')
+const refreshAll = inject('refreshAll')
 
 async function handleClear() {
   try {
     await api.clearAllData()
     message.success('Все данные удалены')
-    emit('refresh')
+    refreshAll()
   } catch (e) {
     message.error('Ошибка: ' + e.message)
   }
@@ -49,7 +48,7 @@ async function handleClear() {
           {{ formatUptime(uptime) }}
         </a-descriptions-item>
         <a-descriptions-item label="Отслеживается сегодня">
-          {{ monitoredApps }} приложений
+          {{ stats.monitored_apps }} приложений
         </a-descriptions-item>
       </a-descriptions>
     </a-card>
@@ -63,9 +62,17 @@ async function handleClear() {
         title="Вы уверены? Это удалит ВСЕ данные!"
         @confirm="handleClear"
         okText="Да, сбросить" cancelText="Отмена"
-        okButtonProps="{ danger: true }">
-        <a-button danger>🗑️ Сбросить все данные</a-button>
+        :okButtonProps="{ danger: true }">
+        <a-button danger block class="danger-btn">
+          <DeleteOutlined /> Сбросить все данные
+        </a-button>
       </a-popconfirm>
     </a-card>
   </div>
 </template>
+
+<style scoped>
+@media (max-width: 768px) {
+  .danger-btn { width: 100%; }
+}
+</style>
