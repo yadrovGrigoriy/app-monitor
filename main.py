@@ -11,7 +11,7 @@ import sys
 import os
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from ui.app_ui import AppUI
-from ui.theme_manager import apply_theme, THEME_DARK, THEME_SETTING_KEY
+from ui.theme_manager import apply_theme, THEME_LIGHT, THEME_SETTING_KEY
 from ui.app_icon import create_app_icon
 from core.database import Database
 from core.monitor import ActivityMonitor
@@ -28,8 +28,27 @@ API_HOST = '0.0.0.0'
 API_PORT = 8765
 
 # SSL-сертификаты для HTTPS (опционально)
-SSL_CERT_FILE = os.path.join(os.path.dirname(__file__), 'data', 'cert.pem')
-SSL_KEY_FILE = os.path.join(os.path.dirname(__file__), 'data', 'key.pem')
+# Поиск: рядом с main.py (разработка), рядом с exe (PyInstaller), %APPDATA%
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else _script_dir
+_appdata_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'AppMonitor')
+
+SSL_CERT_FILE = next(
+    (p for p in [
+        os.path.join(_script_dir, 'data', 'cert.pem'),
+        os.path.join(_exe_dir, 'data', 'cert.pem'),
+        os.path.join(_appdata_dir, 'data', 'cert.pem'),
+    ] if os.path.isfile(p)),
+    os.path.join(_script_dir, 'data', 'cert.pem')  # fallback
+)
+SSL_KEY_FILE = next(
+    (p for p in [
+        os.path.join(_script_dir, 'data', 'key.pem'),
+        os.path.join(_exe_dir, 'data', 'key.pem'),
+        os.path.join(_appdata_dir, 'data', 'key.pem'),
+    ] if os.path.isfile(p)),
+    os.path.join(_script_dir, 'data', 'key.pem')  # fallback
+)
 
 MUTEX_NAME = r'Global\AppMonitor_SingleInstance'
 
@@ -130,7 +149,7 @@ def main():
     db = Database()
     logger.info('База данных инициализирована')
 
-    saved_theme = db.get_setting(THEME_SETTING_KEY, THEME_DARK)
+    saved_theme = db.get_setting(THEME_SETTING_KEY, THEME_LIGHT)
     apply_theme(app, saved_theme)
 
     ssl_cert = SSL_CERT_FILE if os.path.isfile(SSL_CERT_FILE) else None

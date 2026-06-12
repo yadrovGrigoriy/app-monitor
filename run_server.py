@@ -51,7 +51,7 @@ def main():
     logger.info('Нажмите Ctrl+C для остановки')
 
     try:
-        server.thread.join()
+        server._thread.join()
     except KeyboardInterrupt:
         logger.info('Получен сигнал остановки')
     finally:

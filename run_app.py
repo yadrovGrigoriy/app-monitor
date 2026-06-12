@@ -7,7 +7,7 @@ import sys
 import os
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from ui.app_ui import AppUI
-from ui.theme_manager import apply_theme, THEME_DARK, THEME_SETTING_KEY
+from ui.theme_manager import apply_theme, THEME_LIGHT, THEME_SETTING_KEY
 from ui.app_icon import create_app_icon
 from core.database import Database
 from core.monitor import ActivityMonitor
@@ -117,7 +117,7 @@ def main():
     db = Database()
     logger.info('База данных инициализирована')
 
-    saved_theme = db.get_setting(THEME_SETTING_KEY, THEME_DARK)
+    saved_theme = db.get_setting(THEME_SETTING_KEY, THEME_LIGHT)
     apply_theme(app, saved_theme)
 
     ssl_cert = SSL_CERT_FILE if os.path.isfile(SSL_CERT_FILE) else None
