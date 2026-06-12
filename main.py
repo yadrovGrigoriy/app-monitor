@@ -185,26 +185,18 @@ def main():
     window._refresh_all()
     window.show()
 
-    # Фоновая проверка локального обновления (раз в 60 секунд)
-    def _check_local_update():
+    # Фоновая проверка и автоматическое обновление (раз в 30 секунд)
+    def _auto_update():
         try:
-            from core.updater import check_local_update, APP_VERSION
-            new_ver = check_local_update()
-            if new_ver:
-                logger.info(f'Доступно обновление: v{new_ver}')
-                QMessageBox.information(
-                    window, 'Доступно обновление',
-                    f'Найден установщик версии v{new_ver}.\n'
-                    f'Текущая версия: v{APP_VERSION}.\n\n'
-                    f'Запустите AppMonitor_Setup_{new_ver}.exe для обновления.',
-                )
+            from core.updater import apply_local_update
+            apply_local_update()  # если есть обновление — запустит установщик и завершит процесс
         except Exception as e:
-            logger.debug(f'Ошибка проверки обновления: {e}')
+            logger.debug(f'Ошибка автообновления: {e}')
 
-    QTimer.singleShot(5000, _check_local_update)
+    QTimer.singleShot(5000, _auto_update)
     _update_timer = QTimer()
-    _update_timer.timeout.connect(_check_local_update)
-    _update_timer.start(60000)
+    _update_timer.timeout.connect(_auto_update)
+    _update_timer.start(30000)
 
     logger.info('Вход в цикл событий Qt')
     try:

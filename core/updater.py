@@ -65,25 +65,70 @@ def is_newer_version(current: str, latest: str) -> bool:
     return _parse_version(latest) > _parse_version(current)
 
 
+import subprocess
+
+
+def _get_latest_installer() -> str | None:
+    """Найти последний установщик в папке с exe."""
+    exe_dir = os.path.dirname(sys.executable)
+    pattern = os.path.join(exe_dir, "AppMonitor_Setup_*.exe")
+    installers = sorted(glob.glob(pattern))
+    return installers[-1] if installers else None
+
+
+def _extract_version_from_filename(fname: str) -> str:
+    """Извлечь версию из имени файла AppMonitor_Setup_X.X.X.exe."""
+    return fname.replace("AppMonitor_Setup_", "").replace(".exe", "")
+
+
 def check_local_update() -> str | None:
     """Проверить, есть ли установщик новее текущей версии рядом с exe.
 
     Ищет файлы AppMonitor_Setup_*.exe в папке с исполняемым файлом.
     Возвращает версию установщика, если она новее текущей, иначе None.
     """
-    exe_dir = os.path.dirname(sys.executable)
-    pattern = os.path.join(exe_dir, "AppMonitor_Setup_*.exe")
-    installers = sorted(glob.glob(pattern))
-    if not installers:
+    installer_path = _get_latest_installer()
+    if not installer_path:
         return None
 
-    latest_installer = installers[-1]
-    fname = os.path.basename(latest_installer)
-    # AppMonitor_Setup_1.2.24.exe -> 1.2.24
-    version_part = fname.replace("AppMonitor_Setup_", "").replace(".exe", "")
+    fname = os.path.basename(installer_path)
+    version_part = _extract_version_from_filename(fname)
 
     if version_part and is_newer_version(APP_VERSION, version_part):
         logger.info(f"Найден установщик новее: {fname}")
         return version_part
 
     return None
+
+
+def apply_local_update() -> bool:
+    """Запустить установщик в тихом режиме и завершить процесс.
+
+    Ищет установщик новее текущей версии рядом с exe.
+    Если находит — запускает с флагом /S (тихая установка)
+    и завершает текущий процесс.
+    Возвращает True, если обновление запущено.
+    """
+    installer_path = _get_latest_installer()
+    if not installer_path:
+        return False
+
+    fname = os.path.basename(installer_path)
+    version_part = _extract_version_from_filename(fname)
+
+    if not version_part or not is_newer_version(APP_VERSION, version_part):
+        return False
+
+    logger.info(f"Запуск установщика: {installer_path} (v{version_part})")
+
+    try:
+        subprocess.Popen(
+            [installer_path, "/S", "/AUTORUN"],
+            shell=True,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+        logger.info("Установщик запущен, завершаем текущий процесс")
+        sys.exit(0)
+    except OSError as e:
+        logger.error(f"Не удалось запустить установщик: {e}")
+        return False
