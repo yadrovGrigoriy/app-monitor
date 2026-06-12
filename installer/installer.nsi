@@ -1,5 +1,5 @@
 !define PRODUCT_NAME "AppMonitor"
-!define PRODUCT_VERSION "1.2.16"
+!define PRODUCT_VERSION "1.2.17"
 !define PRODUCT_PUBLISHER "AppMonitor Team"
 !define PRODUCT_WEB_SITE "https://appmonitor.local"
 !define PRODUCT_DIR "$PROGRAMFILES64\${PRODUCT_NAME}"

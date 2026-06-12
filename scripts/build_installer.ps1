@@ -83,6 +83,21 @@ $tempFolder = "dist\.temp_build"
 New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
 Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
 
+# Обновляем AppMonitor.spec — указываем выходную папку с версией
+$specPath = "AppMonitor.spec"
+$specContent = Get-Content $specPath -Raw
+$specContent = $specContent -replace "name='AppMonitor'", "name='$versionFolder\AppMonitor'"
+Set-Content $specPath -Value $specContent -NoNewline
+Write-Host "[INFO] AppMonitor.spec: выходная папка -> $versionFolder" -ForegroundColor Gray
+
+# Обновляем installer/installer.nsi — OutFile и File в версионную папку
+$nsiPath = "installer\installer.nsi"
+$nsiContent = Get-Content $nsiPath -Raw
+$nsiContent = $nsiContent -replace 'OutFile "\.\.\\dist\\AppMonitor_Setup_', "OutFile `"..\$versionFolder\AppMonitor_Setup_"
+$nsiContent = $nsiContent -replace 'File "\.\.\\dist\\AppMonitor\.exe"', "File `"..\$versionFolder\AppMonitor.exe`""
+Set-Content $nsiPath -Value $nsiContent -NoNewline
+Write-Host "[INFO] installer.nsi: OutFile и File -> $versionFolder" -ForegroundColor Gray
+
 # ─── Сборка Vue.js веб-интерфейса ────────────────────────────────────
 try {
     Write-Host "[1/3] Сборка Vue.js веб-интерфейса..." -ForegroundColor Yellow
@@ -110,8 +125,8 @@ try {
     $pyiResult = pyinstaller AppMonitor.spec --noconfirm 2>&1
     Write-Host $pyiResult -ForegroundColor Gray
 
-    # PyInstaller кладёт .exe в dist/ (без подпапки)
-    $exeSource = "dist\AppMonitor.exe"
+    # PyInstaller кладёт .exe сразу в версионную папку
+    $exeSource = "$versionFolder\AppMonitor.exe"
     if (-not (Test-Path $exeSource)) {
         throw "AppMonitor.exe не найден после сборки PyInstaller"
     }
@@ -129,7 +144,7 @@ try {
 
     & $makensisPath "installer\installer.nsi" 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
 
-    $setupSource = "dist\AppMonitor_Setup_$newVersion.exe"
+    $setupSource = "$versionFolder\AppMonitor_Setup_$newVersion.exe"
     if (-not (Test-Path $setupSource)) {
         throw "Установщик не найден: $setupSource"
     }
@@ -139,13 +154,6 @@ catch {
     Write-Host "[ОШИБКА] Сборка установщика не удалась: $_" -ForegroundColor Red
     exit 1
 }
-
-# ─── Перемещение в версионную папку ─────────────────────────────────
-Write-Host ""
-Write-Host "Перемещение в папку $versionFolder..." -ForegroundColor Yellow
-Move-Item -Path $exeSource -Destination "$versionFolder\AppMonitor.exe" -Force
-Move-Item -Path $setupSource -Destination "$versionFolder\AppMonitor_Setup_$newVersion.exe" -Force
-Write-Host "[OK] Файлы перемещены" -ForegroundColor Green
 
 # ─── Результат ───────────────────────────────────────────────────────
 Write-Host ""
