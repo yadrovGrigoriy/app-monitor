@@ -78,13 +78,20 @@ class AddLimitDialog(QDialog):
         """Заполнить список приложениями из БД."""
         apps = {}  # app_name -> пример заголовка окна
         # Из текущей активности
-        for a in self.db.get_today_activity():
-            if a['app_name'] not in apps:
-                apps[a['app_name']] = a.get('window_title', '')
-        # Из уже установленных лимитов
-        for l in self.db.get_all_limits():
-            if l['app_name'] not in apps:
-                apps[l['app_name']] = ''
+        if self.db is not None:
+            try:
+                for a in self.db.get_today_activity():
+                    if a['app_name'] not in apps:
+                        apps[a['app_name']] = a.get('window_title', '')
+            except Exception:
+                pass
+            # Из уже установленных лимитов
+            try:
+                for l in self.db.get_all_limits():
+                    if l['app_name'] not in apps:
+                        apps[l['app_name']] = ''
+            except Exception:
+                pass
 
         # Сортируем и добавляем в комбобокс
         for name in sorted(apps.keys()):

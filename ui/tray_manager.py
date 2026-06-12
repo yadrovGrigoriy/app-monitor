@@ -17,6 +17,8 @@ class TrayManager(QObject):
         self.tray_icon = None
         self.notifier = None
         self._icon = icon or create_app_icon()
+        self._settings_action = None
+        self._exit_action = None
         self._init_tray()
 
     def _cleanup_orphan_tray_icons(self):
@@ -77,9 +79,15 @@ class TrayManager(QObject):
         show_action.triggered.connect(self.show_requested)
         tray_menu.addAction(show_action)
 
-        settings_action = QAction('Настройки', self.parent)
-        settings_action.triggered.connect(self.settings_requested)
-        tray_menu.addAction(settings_action)
+        self._settings_action = QAction('Настройки', self.parent)
+        self._settings_action.triggered.connect(self.settings_requested)
+        tray_menu.addAction(self._settings_action)
+
+        tray_menu.addSeparator()
+
+        self._exit_action = QAction('Выход', self.parent)
+        self._exit_action.triggered.connect(QApplication.instance().quit)
+        tray_menu.addAction(self._exit_action)
 
         self.tray_icon.setContextMenu(tray_menu)
 
@@ -92,6 +100,13 @@ class TrayManager(QObject):
     def _on_activated(self, reason):
         if reason in (QSystemTrayIcon.DoubleClick, QSystemTrayIcon.Trigger):
             self.show_requested.emit()
+
+    def set_admin_mode(self, is_admin: bool):
+        """Показать или скрыть пункты 'Настройки' и 'Выход' в зависимости от роли."""
+        if self._settings_action:
+            self._settings_action.setVisible(is_admin)
+        if self._exit_action:
+            self._exit_action.setVisible(is_admin)
 
     def hide(self):
         """Скрыть иконку из трея."""
