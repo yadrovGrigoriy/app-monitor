@@ -40,11 +40,8 @@ function Update-Version {
         $adminContent = $adminContent -replace 'APP_VERSION = "[\d.]+"', "APP_VERSION = `"$newVersion`""
         Set-Content $adminPath -Value $adminContent -NoNewline
 
-        # Обновляем installer/installer.nsi
-        $nsiPath = "installer\installer.nsi"
-        $nsiContent = Get-Content $nsiPath -Raw
-        $nsiContent = $nsiContent -replace '!define PRODUCT_VERSION "[\d.]+"', "!define PRODUCT_VERSION `"$newVersion`""
-        Set-Content $nsiPath -Value $nsiContent -NoNewline
+        # Обновляем installer/installer.nsi (через Python для CP1251)
+        python scripts/patch_nsi.py installer/installer.nsi $newVersion dist\v$newVersion
 
         Write-Host "[OK] Версия обновлена до $newVersion" -ForegroundColor Green
         return $newVersion
@@ -84,11 +81,7 @@ New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
 Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
 
 # Обновляем installer/installer.nsi — OutFile и File в версионную папку
-$nsiPath = "installer\installer.nsi"
-$nsiContent = Get-Content $nsiPath -Raw
-$nsiContent = $nsiContent -replace 'OutFile "\.\.\\dist\\AppMonitor_Setup_', "OutFile `"..\$versionFolder\AppMonitor_Setup_"
-$nsiContent = $nsiContent -replace 'File "\.\.\\dist\\AppMonitor\.exe"', "File `"..\$versionFolder\AppMonitor.exe`""
-Set-Content $nsiPath -Value $nsiContent -NoNewline
+python scripts/patch_nsi.py installer/installer.nsi $newVersion $versionFolder
 Write-Host "[INFO] installer.nsi: OutFile и File -> $versionFolder" -ForegroundColor Gray
 
 # ─── Сборка Vue.js веб-интерфейса ────────────────────────────────────
