@@ -86,7 +86,7 @@ python -m uvicorn api.server:app --host 0.0.0.0 --port 8765
 
 ## Сборка для механизма обновления
 
-Для проверки механизма обновления нужно собрать **3 компонента**:
+Для проверки механизма обновления нужно собрать **2 компонента**:
 
 ### 1. AppMonitor.exe (клиентское приложение)
 ```bash
@@ -94,13 +94,7 @@ pyinstaller AppMonitor.spec --noconfirm
 ```
 Результат: `dist/AppMonitor.exe`
 
-### 2. AppMonitorAdmin.exe (админ-панель)
-```bash
-pyinstaller AppMonitorAdmin.spec --noconfirm
-```
-Результат: `dist/AppMonitorAdmin.exe`
-
-### 3. Установщик AppMonitor_Setup_X.X.X.exe (раздаётся сервером обновлений)
+### 2. Установщик AppMonitor_Setup_X.X.X.exe (раздаётся сервером обновлений)
 ```bash
 # Требуется NSIS (Nullsoft Scriptable Install System)
 # Установка: winget install NSIS.NSIS
@@ -114,7 +108,6 @@ pyinstaller AppMonitorAdmin.spec --noconfirm
 ```bash
 # PowerShell (из корня проекта):
 pyinstaller AppMonitor.spec --noconfirm
-pyinstaller AppMonitorAdmin.spec --noconfirm
 & "C:\Program Files (x86)\NSIS\makensis.exe" installer\installer.nsi
 ```
 
@@ -139,7 +132,7 @@ pyinstaller AppMonitorAdmin.spec --noconfirm
 - Читает текущую версию из `core/updater.py`
 - Увеличивает последнюю цифру (patch) на 1
 - Обновляет версию во всех трёх файлах: `core/updater.py`, `api/admin_server.py`, `installer/installer.nsi`
-- Затем собирает `AppMonitor.exe`, `AppMonitorAdmin.exe` и установщик
+- Затем собирает `AppMonitor.exe` и установщик
 
 Пример: `1.2.1` → `1.2.2` → `1.2.3`
 
