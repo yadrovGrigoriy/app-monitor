@@ -106,4 +106,21 @@ export const api = {
       method: 'DELETE',
     })
   },
+
+  getAdmins() {
+    return request('/api/admins')
+  },
+
+  addAdmin(username, password) {
+    return request('/api/admins', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+  },
+
+  deleteAdmin(username) {
+    return request(`/api/admins/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+    })
+  },
 }

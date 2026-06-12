@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -291,11 +291,40 @@ class AppMonitorAPI:
             self.db.remove_excluded_app(system_id)
             return {"status": "deleted", "system_id": system_id}
 
-        # ─── Синхронизация администраторов ─────────────────────────
+        # ─── Администраторы ────────────────────────────────────────
         @app.get("/api/admins")
         async def get_admins(authorization: str = Header("")):
             _require_auth(authorization)
             return self.db.get_all_admins()
+
+        @app.post("/api/admins")
+        async def add_admin(req: dict, authorization: str = Header("")):
+            _require_auth(authorization)
+            username = req.get('username', '').strip()
+            password = req.get('password', '')
+            if not username or not password:
+                raise HTTPException(status_code=400, detail='Логин и пароль обязательны')
+            if self.db.get_admin(username):
+                raise HTTPException(status_code=409, detail='Администратор уже существует')
+            from core.auth import hash_password
+            self.db.add_admin(username, hash_password(password))
+            logger.info(f'Администратор добавлен через API: {username}')
+            return {"status": "ok", "username": username}
+
+        @app.delete("/api/admins/{username}")
+        async def delete_admin(username: str, authorization: str = Header("")):
+            _require_auth(authorization)
+            admins = self.db.get_all_admins()
+            if len(admins) <= 1:
+                raise HTTPException(status_code=400, detail='Нельзя удалить последнего администратора')
+            conn = self.db._get_connection()
+            try:
+                conn.execute('DELETE FROM admins WHERE username = ?', (username,))
+                conn.commit()
+                logger.info(f'Администратор удалён через API: {username}')
+            finally:
+                conn.close()
+            return {"status": "deleted", "username": username}
 
         @app.post("/api/admins/sync")
         async def sync_admins(admins: list[dict], authorization: str = Header("")):

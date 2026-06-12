@@ -13,7 +13,7 @@ from core.autostart import AutostartManager
 from core.logger import setup_logger
 from ui.styles import global_style, COLOR_DANGER
 
-from ui.dialogs.auth_dialogs import AuthDialog, RegisterDialog
+from ui.dialogs.auth_dialogs import AuthDialog, RegisterDialog, AddAdminDialog
 from ui.dialogs.limit_dialog import AddLimitDialog, EditLimitDialog
 from ui.dialogs.update_dialog import UpdateDialog
 from ui.theme_manager import THEME_LIGHT, THEME_DARK, THEME_SETTING_KEY, apply_theme
@@ -192,6 +192,35 @@ class SettingsDialog(QDialog):
 
         general_layout.addStretch()
 
+        # ── Вкладка администраторов ─────────────────────────────────
+        admins_tab = QWidget()
+        admins_layout = QVBoxLayout(admins_tab)
+        admins_layout.setContentsMargins(4, 4, 4, 4)
+        admins_layout.setSpacing(10)
+        tabs.addTab(admins_tab, 'Администраторы')
+
+        admins_layout.addWidget(QLabel('Список администраторов, имеющих доступ к настройкам:'))
+
+        self.admins_table = QTableWidget()
+        self.admins_table.setColumnCount(2)
+        self.admins_table.setHorizontalHeaderLabels(['Логин', ''])
+        self.admins_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.admins_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.admins_table.setAlternatingRowColors(True)
+        self.admins_table.setShowGrid(False)
+        self.admins_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.admins_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.admins_table.verticalHeader().setVisible(False)
+        self.admins_table.cellDoubleClicked.connect(self._on_admins_table_click)
+        admins_layout.addWidget(self.admins_table, stretch=1)
+
+        btn_admins_layout = QHBoxLayout()
+        btn_add_admin = QPushButton('Добавить администратора')
+        btn_add_admin.clicked.connect(self._add_admin)
+        btn_admins_layout.addWidget(btn_add_admin)
+        btn_admins_layout.addStretch()
+        admins_layout.addLayout(btn_admins_layout)
+
         # ── Вкладка исключений ──────────────────────────────────────
         exclude_tab = QWidget()
         exclude_layout = QVBoxLayout(exclude_tab)
@@ -241,6 +270,8 @@ class SettingsDialog(QDialog):
         self.smtp_port.setValue(int(self.db.get_setting('smtp_port', '587')))
         self.report_enabled.setChecked(self.db.get_setting('report_enabled', '0') == '1')
         self._refresh_limits_table()
+        self._refresh_exclude_table()
+        self._refresh_admins_table()
 
     def _refresh_limits_table(self):
         limits = self.db.get_all_limits()
@@ -458,19 +489,56 @@ class SettingsDialog(QDialog):
             self._refresh_exclude_table()
             logger.info(f'Добавлено исключение: {dialog.app_name}')
 
-    def _load_settings(self):
-        self.email_from.setText(self.db.get_setting('email_from'))
-        self.email_password.setText(self.db.get_setting('email_password'))
-        self.email_to.setText(self.db.get_setting('email_to'))
-        self.smtp_server.setText(self.db.get_setting('smtp_server', 'smtp.gmail.com'))
-        self.smtp_port.setValue(int(self.db.get_setting('smtp_port', '587')))
-        self.report_enabled.setChecked(self.db.get_setting('report_enabled', '0') == '1')
+    def _refresh_admins_table(self):
+        """Обновить таблицу администраторов."""
+        admins = self.db.get_all_admins()
+        self.admins_table.setRowCount(len(admins))
+        for i, admin in enumerate(admins):
+            name_item = QTableWidgetItem(admin['username'])
+            self.admins_table.setItem(i, 0, name_item)
 
-        # Загружаем сохранённую тему
-        saved_theme = self.db.get_setting(THEME_SETTING_KEY, THEME_LIGHT)
-        idx = self.theme_combo.findData(saved_theme)
-        if idx >= 0:
-            self.theme_combo.setCurrentIndex(idx)
+            del_item = QTableWidgetItem('✕')
+            del_item.setTextAlignment(Qt.AlignCenter)
+            del_item.setForeground(QColor(COLOR_DANGER))
+            del_font = del_item.font()
+            del_font.setBold(True)
+            del_item.setFont(del_font)
+            self.admins_table.setItem(i, 1, del_item)
 
-        self._refresh_limits_table()
-        self._refresh_exclude_table()
+        self.admins_table.resizeRowsToContents()
+
+    def _on_admins_table_click(self, row: int, column: int):
+        """Обработка клика по таблице администраторов."""
+        if column == 1:
+            username = self.admins_table.item(row, 0).text()
+            # Не даём удалить последнего администратора
+            admins = self.db.get_all_admins()
+            if len(admins) <= 1:
+                QMessageBox.warning(self, 'Ошибка', 'Нельзя удалить последнего администратора')
+                return
+            reply = QMessageBox.question(
+                self, 'Удаление администратора',
+                f'Удалить администратора "{username}"?',
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                conn = self.db._get_connection()
+                try:
+                    conn.execute('DELETE FROM admins WHERE username = ?', (username,))
+                    conn.commit()
+                    logger.info(f'Администратор удалён: {username}')
+                finally:
+                    conn.close()
+                self._refresh_admins_table()
+
+    def _add_admin(self):
+        """Диалог добавления администратора."""
+        dialog = AddAdminDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            username = dialog.username_input.text().strip()
+            password = dialog.password_input.text()
+            if self.auth.register(username, password):
+                QMessageBox.information(self, 'Успех', f'Администратор "{username}" добавлен')
+                self._refresh_admins_table()
+            else:
+                QMessageBox.warning(self, 'Ошибка', f'Администратор "{username}" уже существует')

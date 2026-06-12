@@ -274,6 +274,7 @@ class TestSettingsDialogLogic(unittest.TestCase):
         dialog.theme_combo.findData.return_value = 0
         dialog._refresh_limits_table = MagicMock()
         dialog._refresh_exclude_table = MagicMock()
+        dialog._refresh_admins_table = MagicMock()
 
         dialog._load_settings()
 

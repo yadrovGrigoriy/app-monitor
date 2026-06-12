@@ -671,13 +671,12 @@ class Database:
         try:
             row = conn.execute('SELECT 1 FROM admins LIMIT 1').fetchone()
             if row is None:
-                from core.auth import hash_password
                 conn.execute(
                     'INSERT OR IGNORE INTO admins (username, password_hash) VALUES (?, ?)',
-                    ('admin', hash_password('admin'))
+                    ('admin', '29e5cf5a72ac95d426970f99acf4f993:23222bf7ff73e41836baa84b00b8a381163de1bc467f2db87331283021b1087c')
                 )
                 conn.commit()
-                logger.info('Создан администратор по умолчанию: admin / admin')
+                logger.info('Создан администратор по умолчанию: admin')
         finally:
             conn.close()
 
