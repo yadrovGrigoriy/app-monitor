@@ -16,16 +16,19 @@ data = re.sub(
     data
 )
 
-# Обновляем OutFile
-data = data.replace(
-    b'..\\dist\\AppMonitor_Setup_',
-    f'..\\{version_folder}\\AppMonitor_Setup_'.encode('cp1251')
+# Обновляем OutFile (заменяем любой путь до AppMonitor_Setup_)
+version_folder_escaped = version_folder.replace('\\', '\\\\')
+data = re.sub(
+    rb'..\\(?:dist(?:\\v[\d.]+)?)\\AppMonitor_Setup_',
+    f'..\\\\{version_folder_escaped}\\\\AppMonitor_Setup_'.encode('cp1251'),
+    data
 )
 
-# Обновляем File
-data = data.replace(
-    b'..\\dist\\AppMonitor.exe',
-    f'..\\{version_folder}\\AppMonitor.exe'.encode('cp1251')
+# Обновляем File (заменяем любой путь до AppMonitor.exe)
+data = re.sub(
+    rb'..\\(?:dist(?:\\v[\d.]+)?)\\AppMonitor\.exe',
+    f'..\\\\{version_folder_escaped}\\\\AppMonitor.exe'.encode('cp1251'),
+    data
 )
 
 with open(path, 'wb') as f:
