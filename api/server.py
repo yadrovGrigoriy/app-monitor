@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -438,6 +438,43 @@ class AppMonitorAPI:
                 filename=f"AppMonitor_Setup_{version}.exe",
                 media_type="application/x-msdownload",
             )
+
+        # ─── Загрузка обновления ────────────────────────────────────
+        @app.post("/api/update/upload")
+        async def upload_update(file: UploadFile = File(...), authorization: str = Header("")):
+            """Загрузить установщик обновления на сервер."""
+            _require_auth(authorization)
+
+            if not file.filename or not file.filename.endswith(".exe"):
+                raise HTTPException(status_code=400, detail="Требуется .exe файл")
+
+            # Сохраняем в dist/ рядом с проектом
+            installer_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
+            os.makedirs(installer_dir, exist_ok=True)
+
+            # Извлекаем версию из имени файла: AppMonitor_Setup_X.X.X.exe
+            fname = file.filename
+            version_part = fname.replace("AppMonitor_Setup_", "").replace(".exe", "")
+            dest_path = os.path.join(installer_dir, fname)
+
+            # Сохраняем файл чанками
+            file_size = 0
+            with open(dest_path, "wb") as f:
+                while True:
+                    chunk = await file.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    file_size += len(chunk)
+
+            logger.info(f"Установщик загружен: {dest_path} ({file_size / 1024 / 1024:.1f} МБ)")
+
+            return {
+                "status": "ok",
+                "filename": fname,
+                "version": version_part if version_part != fname else "",
+                "file_size": file_size,
+            }
 
         # ─── Очистка данных ────────────────────────────────────────
         @app.post("/api/data/clear")

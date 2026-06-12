@@ -123,4 +123,44 @@ export const api = {
       method: 'DELETE',
     })
   },
+
+  uploadUpdate(file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const xhr = new XMLHttpRequest()
+      const activeToken = token || localStorage.getItem('token')
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.round((e.loaded / e.total) * 100))
+        }
+      })
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status === 200) {
+          resolve(JSON.parse(xhr.responseText))
+        } else if (xhr.status === 401) {
+          setToken('')
+          reject(new Error('Требуется авторизация'))
+        } else {
+          try {
+            const err = JSON.parse(xhr.responseText)
+            reject(new Error(err.detail || `HTTP ${xhr.status}`))
+          } catch {
+            reject(new Error(`HTTP ${xhr.status}`))
+          }
+        }
+      })
+
+      xhr.addEventListener('error', () => reject(new Error('Ошибка сети')))
+
+      xhr.open('POST', `${API_BASE}/api/update/upload`)
+      if (activeToken) {
+        xhr.setRequestHeader('Authorization', `Bearer ${activeToken}`)
+      }
+      xhr.send(formData)
+    })
+  },
 }

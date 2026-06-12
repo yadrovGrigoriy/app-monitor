@@ -2,7 +2,7 @@
 import { ref, inject, onMounted } from 'vue'
 import { api } from '../api'
 import { formatUptime } from '../utils'
-import { DeleteOutlined, UserAddOutlined } from '@ant-design/icons-vue'
+import { DeleteOutlined, UserAddOutlined, CloudUploadOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 
 const settings = inject('settings')
@@ -16,6 +16,44 @@ const newAdminUsername = ref('')
 const newAdminPassword = ref('')
 const newAdminPasswordConfirm = ref('')
 const showAddForm = ref(false)
+
+// ─── Загрузка обновления ────────────────────────────────────────
+const uploading = ref(false)
+const uploadProgress = ref(0)
+const uploadResult = ref(null)
+const fileInput = ref(null)
+
+function handleSelectFile() {
+  fileInput.value?.click()
+}
+
+async function handleFileChange(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+
+  if (!file.name.endsWith('.exe')) {
+    message.warning('Пожалуйста, выберите .exe файл установщика')
+    return
+  }
+
+  uploading.value = true
+  uploadProgress.value = 0
+  uploadResult.value = null
+
+  try {
+    const result = await api.uploadUpdate(file, (pct) => {
+      uploadProgress.value = pct
+    })
+    uploadResult.value = result
+    message.success(`Установщик ${result.filename} загружен`)
+  } catch (e) {
+    message.error('Ошибка загрузки: ' + e.message)
+  } finally {
+    uploading.value = false
+    // Сбрасываем input, чтобы можно было загрузить тот же файл снова
+    e.target.value = ''
+  }
+}
 
 async function loadAdmins() {
   try {
@@ -156,6 +194,55 @@ onMounted(loadAdmins)
           {{ stats.monitored_apps }} приложений
         </a-descriptions-item>
       </a-descriptions>
+    </a-card>
+
+    <a-card title="Обновление" :bordered="false" style="margin-bottom:16px">
+      <a-alert
+        message="Загрузка установщика"
+        description="Загрузите файл AppMonitor_Setup_X.X.X.exe на сервер. После загрузки клиенты смогут скачать новую версию через автообновление."
+        type="info" show-icon style="margin-bottom:16px" />
+
+      <input
+        ref="fileInput"
+        type="file"
+        accept=".exe"
+        style="display:none"
+        @change="handleFileChange"
+      />
+
+      <div style="display:flex; flex-direction:column; gap:12px">
+        <a-button
+          type="primary"
+          @click="handleSelectFile"
+          :loading="uploading"
+          :disabled="uploading"
+          style="width:fit-content"
+        >
+          <CloudUploadOutlined />
+          {{ uploading ? 'Загрузка...' : 'Выбрать установщик' }}
+        </a-button>
+
+        <a-progress
+          v-if="uploading"
+          :percent="uploadProgress"
+          :status="uploadProgress === 100 ? 'success' : 'active'"
+          style="max-width:400px"
+        />
+
+        <a-alert
+          v-if="uploadResult"
+          type="success"
+          show-icon
+          closable
+          @close="uploadResult = null"
+        >
+          <template #message>
+            <strong>{{ uploadResult.filename }}</strong> загружен
+            <span v-if="uploadResult.version">(версия {{ uploadResult.version }})</span>
+            — {{ (uploadResult.file_size / 1024 / 1024).toFixed(1) }} МБ
+          </template>
+        </a-alert>
+      </div>
     </a-card>
 
     <a-card title="Опасная зона" :bordered="false" class="card-danger">
