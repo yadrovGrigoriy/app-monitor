@@ -46,7 +46,7 @@ Function unselectShortcuts
     SectionSetFlags 3 0
 FunctionEnd
 
-Section "!Основные файлы" SecCore
+Section "!╬ёэютэ√х Їрщы√" SecCore
     SectionIn RO
     SetOutPath "$INSTDIR"
     File "..\dist\AppMonitor.exe"
@@ -69,17 +69,17 @@ Section "!Основные файлы" SecCore
     WriteRegDWORD HKLM "${PRODUCT_UNINSTALL_KEY}" "EstimatedSize" "$0"
 SectionEnd
 
-Section "Ярлык в меню Пуск" SecStartMenu
+Section "▀Ёы√ъ т ьхэ■ ╧єёъ" SecStartMenu
     CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
     CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\AppMonitor.lnk" "$INSTDIR\AppMonitor.exe" "" "$INSTDIR\AppMonitor.exe" 0
-    CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Удалить AppMonitor.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
+    CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\╙фрышЄ№ AppMonitor.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
 SectionEnd
 
-Section "Ярлык на рабочем столе" SecDesktop
+Section "▀Ёы√ъ эр Ёрсюўхь ёЄюых" SecDesktop
     CreateShortCut "$DESKTOP\AppMonitor.lnk" "$INSTDIR\AppMonitor.exe" "" "$INSTDIR\AppMonitor.exe" 0
 SectionEnd
 
-Section "Автозапуск (рекомендуется)" SecAutostart
+Section "└тЄючряєёъ (ЁхъюьхэфєхЄё )" SecAutostart
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AppMonitor" "$INSTDIR\AppMonitor.exe"
 SectionEnd
 
@@ -88,13 +88,13 @@ Section -PostInstall
     Exec "$INSTDIR\AppMonitor.exe"
 SectionEnd
 
-LangString DESC_SecCore ${LANG_RUSSIAN} "Основные файлы приложения (обязательно)"
+LangString DESC_SecCore ${LANG_RUSSIAN} "╬ёэютэ√х Їрщы√ яЁшыюцхэш  (юс чрЄхы№эю)"
 LangString DESC_SecCore ${LANG_ENGLISH} "Core program files (required)"
-LangString DESC_SecStartMenu ${LANG_RUSSIAN} "Создать ярлык в меню Пуск"
+LangString DESC_SecStartMenu ${LANG_RUSSIAN} "╤ючфрЄ№  Ёы√ъ т ьхэ■ ╧єёъ"
 LangString DESC_SecStartMenu ${LANG_ENGLISH} "Add shortcuts to Start Menu"
-LangString DESC_SecDesktop ${LANG_RUSSIAN} "Создать ярлык на рабочем столе"
+LangString DESC_SecDesktop ${LANG_RUSSIAN} "╤ючфрЄ№  Ёы√ъ эр Ёрсюўхь ёЄюых"
 LangString DESC_SecDesktop ${LANG_ENGLISH} "Add shortcut to Desktop"
-LangString DESC_SecAutostart ${LANG_RUSSIAN} "Автоматически запускать AppMonitor при входе в Windows"
+LangString DESC_SecAutostart ${LANG_RUSSIAN} "└тЄюьрЄшўхёъш чряєёърЄ№ AppMonitor яЁш тїюфх т Windows"
 LangString DESC_SecAutostart ${LANG_ENGLISH} "Automatically start AppMonitor on Windows login"
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
@@ -114,6 +114,6 @@ Section "Uninstall"
     RMDir /r "$INSTDIR"
     DeleteRegKey HKLM "${PRODUCT_UNINSTALL_KEY}"
     IfFileExists "$APPDATA\AppMonitor\*.*" 0 +3
-        MessageBox MB_YESNO|MB_ICONQUESTION "Удалить данные в AppData ($APPDATA\AppMonitor)?$\n$\nВнимание: будут удалены все логи и БД!" IDNO +2
+        MessageBox MB_YESNO|MB_ICONQUESTION "╙фрышЄ№ фрээ√х т AppData ($APPDATA\AppMonitor)?$\n$\n┬эшьрэшх: сєфєЄ єфрыхэ√ тёх ыюуш ш ┴─!" IDNO +2
         RMDir /r "$APPDATA\AppMonitor"
 SectionEnd
