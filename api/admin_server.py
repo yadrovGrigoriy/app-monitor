@@ -28,7 +28,7 @@ logger = setup_logger('api.admin_server')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
 
-APP_VERSION = "1.2.19"
+APP_VERSION = "1.2.20"
 APP_NAME = "AppMonitor"
 
 # Путь к папке с установщиками (собираются скриптом build_installer.ps1)
@@ -294,14 +294,31 @@ def run_admin_server(host: str = "0.0.0.0", port: int = 8766):
         for inst in installers:
             logger.info(f"  {inst.name} ({inst.stat().st_size / 1024 / 1024:.1f} МБ)")
 
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        log_level="info",
-        ssl_keyfile=None,  # HTTP (без HTTPS для простоты)
-        ssl_certfile=None,
-    )
+    # Пути к SSL-сертификатам
+    cert_dir = Path(__file__).resolve().parent.parent / "data"
+    ssl_key = cert_dir / "key.pem"
+    ssl_cert = cert_dir / "cert.pem"
+
+    if ssl_key.exists() and ssl_cert.exists():
+        logger.info(f"HTTPS включён (cert={ssl_cert}, key={ssl_key})")
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            ssl_keyfile=str(ssl_key),
+            ssl_certfile=str(ssl_cert),
+        )
+    else:
+        logger.warning("SSL-сертификаты не найдены, запуск без HTTPS")
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            ssl_keyfile=None,
+            ssl_certfile=None,
+        )
 
 
 if __name__ == "__main__":

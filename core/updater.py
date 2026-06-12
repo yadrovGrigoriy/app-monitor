@@ -24,7 +24,7 @@ logger = setup_logger('core.updater')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
 
-APP_VERSION = "1.2.19"
+APP_VERSION = "1.2.20"
 
 # Адрес сервера обновлений Admin UI
 ADMIN_SERVER_URL = "https://192.168.3.27:8766"
