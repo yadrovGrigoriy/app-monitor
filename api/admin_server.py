@@ -23,12 +23,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.logger import setup_logger
+from core.updater import APP_VERSION
 
 logger = setup_logger('api.admin_server')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
 
-APP_VERSION = "1.2.20"
 APP_NAME = "AppMonitor"
 
 # Путь к папке с установщиками (собираются скриптом build_installer.ps1)

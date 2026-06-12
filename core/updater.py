@@ -17,6 +17,7 @@ import json
 import tempfile
 import subprocess
 import dataclasses
+from pathlib import Path
 from typing import Callable
 from core.logger import setup_logger
 
@@ -24,7 +25,15 @@ logger = setup_logger('core.updater')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
 
-APP_VERSION = "1.2.20"
+# Версия берётся из pyproject.toml (единственный источник)
+_pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+if _pyproject.exists():
+    import tomllib
+    with open(_pyproject, "rb") as _f:
+        _data = tomllib.load(_f)
+    APP_VERSION = _data["project"]["version"]
+else:
+    APP_VERSION = "0.0.0"  # fallback для тестов
 
 # Адрес сервера обновлений Admin UI
 ADMIN_SERVER_URL = "https://192.168.3.27:8766"

@@ -19,10 +19,10 @@ Write-Host ""
 
 # ─── Автоинкремент версии ────────────────────────────────────────────
 function Update-Version {
-    $updaterPath = "core\updater.py"
-    $content = Get-Content $updaterPath -Raw
+    $pyprojectPath = "pyproject.toml"
+    $content = Get-Content $pyprojectPath -Raw
 
-    if ($content -match 'APP_VERSION = "(\d+)\.(\d+)\.(\d+)"') {
+    if ($content -match 'version = "(\d+)\.(\d+)\.(\d+)"') {
         $major = [int]$Matches[1]
         $minor = [int]$Matches[2]
         $patch = [int]$Matches[3] + 1
@@ -30,15 +30,9 @@ function Update-Version {
 
         Write-Host "Повышаю версию: $($Matches[0]) -> $newVersion" -ForegroundColor Yellow
 
-        # Обновляем core/updater.py
-        $content = $content -replace 'APP_VERSION = "[\d.]+"', "APP_VERSION = `"$newVersion`""
-        Set-Content $updaterPath -Value $content -NoNewline
-
-        # Обновляем api/admin_server.py
-        $adminPath = "api\admin_server.py"
-        $adminContent = Get-Content $adminPath -Raw
-        $adminContent = $adminContent -replace 'APP_VERSION = "[\d.]+"', "APP_VERSION = `"$newVersion`""
-        Set-Content $adminPath -Value $adminContent -NoNewline
+        # Обновляем pyproject.toml (единственный источник версии)
+        $content = $content -replace 'version = "[\d.]+', "version = `"$newVersion"
+        Set-Content $pyprojectPath -Value $content -NoNewline
 
         # Обновляем installer/installer.nsi (через Python для CP1251)
         python scripts/patch_nsi.py installer/installer.nsi $newVersion dist\v$newVersion
@@ -46,7 +40,7 @@ function Update-Version {
         Write-Host "[OK] Версия обновлена до $newVersion" -ForegroundColor Green
         return $newVersion
     } else {
-        Write-Host "[ОШИБКА] Не удалось найти версию в core\updater.py" -ForegroundColor Red
+        Write-Host "[ОШИБКА] Не удалось найти версию в pyproject.toml" -ForegroundColor Red
         exit 1
     }
 }
