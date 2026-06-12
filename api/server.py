@@ -2,14 +2,18 @@ import asyncio
 import datetime
 import json
 import os
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from core.database import Database
 from core.auth import AuthManager
@@ -63,6 +67,48 @@ class AppMonitorAPI:
         )
 
         self._register_routes()
+        self._mount_web_ui()
+
+    def _mount_web_ui(self):
+        """Подключить веб-интерфейс администратора."""
+        # Поиск папки web в нескольких местах:
+        #   1. _MEIPASS/api/web  (PyInstaller --onedir)
+        #   2. _MEIPASS/web      (PyInstaller --onefile, данные в корне)
+        #   3. api/web/          (разработка, рядом с server.py)
+        #   4. ../api/web/       (запуск из корня проекта)
+        meipass = Path(getattr(sys, '_MEIPASS', ''))
+        script_dir = Path(__file__).resolve().parent
+        candidates = [
+            meipass / "api" / "web",
+            meipass / "web",
+            script_dir / "web",
+            script_dir.parent / "api" / "web",
+        ]
+        web_dir = None
+        for c in candidates:
+            if c.is_dir():
+                web_dir = c
+                break
+        if web_dir is None:
+            logger.warning(f"Папка веб-интерфейса не найдена. Искали: {candidates}")
+            return
+
+        # Раздаём статику (CSS, JS)
+        self.app.mount("/web", StaticFiles(directory=str(web_dir), html=True), name="web")
+
+        # SPA-редирект: все не-API пути отдаём index.html
+        @self.app.get("/{full_path:path}")
+        async def serve_spa(full_path: str):
+            if full_path.startswith("api/"):
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404)
+            index_path = web_dir / "index.html"
+            if index_path.is_file():
+                return FileResponse(str(index_path))
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404)
+
+        logger.info(f"Веб-интерфейс подключён: {web_dir}")
 
     def _register_routes(self):
         app = self.app
@@ -93,6 +139,26 @@ class AppMonitorAPI:
                     (date,)
                 ).fetchall()
                 return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+        @app.get("/api/activity/period")
+        async def get_activity_for_period(start: str, end: str):
+            """Активность за период (включая обе даты)."""
+            conn = self.db._get_connection()
+            try:
+                rows = conn.execute(
+                    'SELECT a.app_name, a.system_id, SUM(d.total_seconds) as duration_seconds '
+                    'FROM daily_activity d '
+                    'INNER JOIN apps a ON a.id = d.app_id '
+                    'WHERE d.date >= ? AND d.date <= ? AND d.total_seconds > 0 '
+                    'GROUP BY a.app_name, a.system_id '
+                    'ORDER BY duration_seconds DESC',
+                    (start, end)
+                ).fetchall()
+                apps_list = [dict(r) for r in rows]
+                total = sum(a['duration_seconds'] for a in apps_list)
+                return {'total_seconds': total, 'apps': apps_list}
             finally:
                 conn.close()
 
@@ -343,6 +409,13 @@ class AppMonitorAPI:
                 filename=f"AppMonitor_Setup_{version}.exe",
                 media_type="application/x-msdownload",
             )
+
+        # ─── Очистка данных ────────────────────────────────────────
+        @app.post("/api/data/clear")
+        async def clear_data(authorization: str = Header("")):
+            _require_auth(authorization)
+            self.db.clear_data()
+            return {"status": "ok", "message": "Все данные очищены"}
 
     def start(self):
         """Запускает FastAPI-сервер в фоновом потоке."""
