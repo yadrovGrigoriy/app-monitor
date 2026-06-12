@@ -83,13 +83,6 @@ $tempFolder = "dist\.temp_build"
 New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
 Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
 
-# Обновляем AppMonitor.spec — указываем выходную папку с версией
-$specPath = "AppMonitor.spec"
-$specContent = Get-Content $specPath -Raw
-$specContent = $specContent -replace "name='AppMonitor'", "name='$versionFolder\AppMonitor'"
-Set-Content $specPath -Value $specContent -NoNewline
-Write-Host "[INFO] AppMonitor.spec: выходная папка -> $versionFolder" -ForegroundColor Gray
-
 # Обновляем installer/installer.nsi — OutFile и File в версионную папку
 $nsiPath = "installer\installer.nsi"
 $nsiContent = Get-Content $nsiPath -Raw
@@ -125,11 +118,13 @@ try {
     $pyiResult = pyinstaller AppMonitor.spec --noconfirm 2>&1
     Write-Host $pyiResult -ForegroundColor Gray
 
-    # PyInstaller кладёт .exe сразу в версионную папку
-    $exeSource = "$versionFolder\AppMonitor.exe"
-    if (-not (Test-Path $exeSource)) {
+    # PyInstaller всегда кладёт .exe в корень dist/
+    $exeTemp = "dist\AppMonitor.exe"
+    if (-not (Test-Path $exeTemp)) {
         throw "AppMonitor.exe не найден после сборки PyInstaller"
     }
+    # Перемещаем в версионную папку
+    Move-Item -Path $exeTemp -Destination "$versionFolder\AppMonitor.exe" -Force
     $exeSize = (Get-Item $exeSource).Length
     Write-Host "  [OK] AppMonitor.exe собран ($('{0:N2}' -f ($exeSize / 1MB)) MB)" -ForegroundColor Green
 }
