@@ -35,8 +35,23 @@ if %ERRORLEVEL% neq 0 (
 :: ─── Переход в корень проекта ──────────────────────────────────────
 cd /d "%~dp0.."
 
+:: ─── Сборка Vue.js веб-интерфейса ──────────────────────────────────
+echo [1/3] Сборка Vue.js веб-интерфейса...
+cd api\web-vue
+call npm run build
+if %ERRORLEVEL% neq 0 (
+    echo [ОШИБКА] Сборка Vue.js не удалась
+    pause
+    exit /b 1
+)
+cd ..\..
+:: Копируем результат в api/web/
+if exist "api\web" rmdir /s /q "api\web"
+xcopy /e /i /q "api\web-vue\dist" "api\web"
+echo [OK] Vue.js веб-интерфейс собран
+
 :: ─── Сборка AppMonitor.exe ─────────────────────────────────────────
-echo [1/3] Сборка AppMonitor.exe...
+echo [2/3] Сборка AppMonitor.exe...
 pyinstaller AppMonitor.spec --noconfirm
 if %ERRORLEVEL% neq 0 (
     echo [ОШИБКА] Сборка AppMonitor.exe не удалась
@@ -44,16 +59,6 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 echo [OK] AppMonitor.exe собран
-
-:: ─── Сборка AppMonitorAdmin.exe ────────────────────────────────────
-echo [2/3] Сборка AppMonitorAdmin.exe...
-pyinstaller AppMonitorAdmin.spec --noconfirm
-if %ERRORLEVEL% neq 0 (
-    echo [ОШИБКА] Сборка AppMonitorAdmin.exe не удалась
-    pause
-    exit /b 1
-)
-echo [OK] AppMonitorAdmin.exe собран
 
 :: ─── Сборка установщика ────────────────────────────────────────────
 echo [3/3] Сборка установщика (NSIS)...

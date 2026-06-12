@@ -1,0 +1,8 @@
+f=open('installer/installer.nsi','r',encoding='cp1251')
+c=f.read()
+f.close()
+c=c.replace('Exec "" "$INSTDIR\\AppMonitor.exe" "" SW_SHOWNORMAL', 'Exec "$INSTDIR\\AppMonitor.exe"')
+f=open('installer/installer.nsi','w',encoding='cp1251')
+f.write(c)
+f.close()
+print('OK')

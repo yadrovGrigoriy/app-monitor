@@ -10,7 +10,9 @@ a = Analysis(
     ['main.py'],
     pathex=[r'C:\code\AppMonitor'],
     binaries=[],
-    datas=[],
+    datas=[
+        ('api/web', 'api/web'),
+    ],
     hiddenimports=[
         'PyQt5.sip',
         'qdarktheme',

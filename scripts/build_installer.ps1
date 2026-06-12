@@ -2,9 +2,10 @@
 .SYNOPSIS
     Сборка установщика AppMonitor для Windows.
 .DESCRIPTION
-    1. Собирает AppMonitor.exe и AppMonitorAdmin.exe через PyInstaller
-    2. Собирает установщик через NSIS
-    3. Результат: dist\AppMonitor_Setup_<version>.exe
+    1. Собирает Vue.js веб-интерфейс (npm run build)
+    2. Собирает AppMonitor.exe через PyInstaller
+    3. Собирает установщик через NSIS
+    4. Результат: dist\AppMonitor_Setup_<version>.exe
 #>
 
 $ErrorActionPreference = "Stop"
@@ -82,67 +83,69 @@ $tempFolder = "dist\.temp_build"
 New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
 Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
 
+# ─── Сборка Vue.js веб-интерфейса ────────────────────────────────────
+try {
+    Write-Host "[1/3] Сборка Vue.js веб-интерфейса..." -ForegroundColor Yellow
+    Set-Location "api\web-vue"
+    npm run build
+    if ($LASTEXITCODE -ne 0) { throw "npm build failed" }
+    Set-Location $ProjectRoot
+    # Копируем результат в api/web/
+    $webDist = "api\web-vue\dist"
+    $webTarget = "api\web"
+    Remove-Item -Path $webTarget -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-Item -Path $webDist -Destination $webTarget -Recurse
+    Write-Host "[OK] Vue.js веб-интерфейс собран" -ForegroundColor Green
+}
+catch {
+    Write-Host "[ОШИБКА] Сборка Vue.js не удалась: $_" -ForegroundColor Red
+    Set-Location $ProjectRoot
+    exit 1
+}
+
 # ─── Сборка .exe ─────────────────────────────────────────────────────
 try {
-    Write-Host "[1/3] Сборка AppMonitor.exe..." -ForegroundColor Yellow
-    pyinstaller AppMonitor.spec --noconfirm --distpath $tempFolder
-    # PyInstaller создаёт подпапку с именем spec-файла, перемещаем .exe
-    Get-ChildItem "$tempFolder\AppMonitor\AppMonitor.exe" -ErrorAction SilentlyContinue | Move-Item -Destination "$versionFolder\AppMonitor.exe" -Force
-    Get-ChildItem "$tempFolder\AppMonitor.exe" -ErrorAction SilentlyContinue | Move-Item -Destination "$versionFolder\AppMonitor.exe" -Force
-    Write-Host "[OK] AppMonitor.exe собран" -ForegroundColor Green
+    Write-Host "[2/3] Сборка AppMonitor.exe..." -ForegroundColor Yellow
+    Write-Host "  -> Запуск PyInstaller (это может занять 2-5 минут)..." -ForegroundColor Gray
+    $pyiResult = pyinstaller AppMonitor.spec --noconfirm 2>&1
+    Write-Host $pyiResult -ForegroundColor Gray
 
-    Write-Host "[2/3] Сборка AppMonitorAdmin.exe..." -ForegroundColor Yellow
-    pyinstaller AppMonitorAdmin.spec --noconfirm --distpath $tempFolder
-    Get-ChildItem "$tempFolder\AppMonitorAdmin\AppMonitorAdmin.exe" -ErrorAction SilentlyContinue | Move-Item -Destination "$versionFolder\AppMonitorAdmin.exe" -Force
-    Get-ChildItem "$tempFolder\AppMonitorAdmin.exe" -ErrorAction SilentlyContinue | Move-Item -Destination "$versionFolder\AppMonitorAdmin.exe" -Force
-    Write-Host "[OK] AppMonitorAdmin.exe собран" -ForegroundColor Green
+    # PyInstaller кладёт .exe в dist/ (без подпапки)
+    $exeSource = "dist\AppMonitor.exe"
+    if (-not (Test-Path $exeSource)) {
+        throw "AppMonitor.exe не найден после сборки PyInstaller"
+    }
+    $exeSize = (Get-Item $exeSource).Length
+    Write-Host "  [OK] AppMonitor.exe собран ($('{0:N2}' -f ($exeSize / 1MB)) MB)" -ForegroundColor Green
 }
 catch {
     Write-Host "[ОШИБКА] Сборка .exe не удалась: $_" -ForegroundColor Red
     exit 1
-}
-finally {
-    Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # ─── Сборка установщика ─────────────────────────────────────────────
 try {
     Write-Host "[3/3] Сборка установщика (NSIS)..." -ForegroundColor Yellow
 
-    # Создаём временную копию installer.nsi с путями к папке версии
-    $nsiContent = Get-Content "installer\installer.nsi" -Raw
-    $nsiContent = $nsiContent -replace 'File "\.\.\\dist\\AppMonitor\.exe"', "File `"..\$versionFolder\AppMonitor.exe`""
-    $nsiContent = $nsiContent -replace 'File "\.\.\\dist\\AppMonitorAdmin\.exe"', "File `"..\$versionFolder\AppMonitorAdmin.exe`""
-    $nsiContent = $nsiContent -replace 'OutFile "\.\.\\dist\\AppMonitor_Setup_', "OutFile `"..\$versionFolder\AppMonitor_Setup_"
-    $tempNsi = "installer\.temp_build.nsi"
-    Set-Content $tempNsi -Value $nsiContent -NoNewline
+    & $makensisPath "installer\installer.nsi" 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
 
-    & $makensisPath $tempNsi
-    Remove-Item $tempNsi -Force -ErrorAction SilentlyContinue
-
-    Write-Host "[OK] Установщик собран" -ForegroundColor Green
+    $setupSource = "dist\AppMonitor_Setup_$newVersion.exe"
+    if (-not (Test-Path $setupSource)) {
+        throw "Установщик не найден: $setupSource"
+    }
+    Write-Host "  [OK] Установщик собран" -ForegroundColor Green
 }
 catch {
     Write-Host "[ОШИБКА] Сборка установщика не удалась: $_" -ForegroundColor Red
     exit 1
 }
 
-# ─── Очистка БД ────────────────────────────────────────────────────
-try {
-    Write-Host "[4/4] Очистка пользовательских данных в БД..." -ForegroundColor Yellow
-    python -c "
-import sys
-sys.path.insert(0, '.')
-from core.database import Database
-db = Database()
-db.clear_data()
-print('OK')
-"
-    Write-Host "[OK] Данные в БД очищены" -ForegroundColor Green
-}
-catch {
-    Write-Host "[ПРЕДУПРЕЖДЕНИЕ] Не удалось очистить БД: $_" -ForegroundColor Yellow
-}
+# ─── Перемещение в версионную папку ─────────────────────────────────
+Write-Host ""
+Write-Host "Перемещение в папку $versionFolder..." -ForegroundColor Yellow
+Move-Item -Path $exeSource -Destination "$versionFolder\AppMonitor.exe" -Force
+Move-Item -Path $setupSource -Destination "$versionFolder\AppMonitor_Setup_$newVersion.exe" -Force
+Write-Host "[OK] Файлы перемещены" -ForegroundColor Green
 
 # ─── Результат ───────────────────────────────────────────────────────
 Write-Host ""
