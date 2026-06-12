@@ -30,9 +30,15 @@ function Update-Version {
 
         Write-Host "Повышаю версию: $($Matches[0]) -> $newVersion" -ForegroundColor Yellow
 
-        # Обновляем pyproject.toml (единственный источник версии)
+        # Обновляем pyproject.toml
         $content = $content -replace 'version = "[\d.]+', "version = `"$newVersion"
         Set-Content $pyprojectPath -Value $content -NoNewline
+
+        # Обновляем core/updater.py (зашитая версия для PyInstaller)
+        $updaterPath = "core\updater.py"
+        $updaterContent = Get-Content $updaterPath -Raw
+        $updaterContent = $updaterContent -replace 'APP_VERSION = "[\d.]+', "APP_VERSION = `"$newVersion"
+        Set-Content $updaterPath -Value $updaterContent -NoNewline
 
         # Обновляем installer/installer.nsi (через Python для CP1251)
         python scripts/patch_nsi.py installer/installer.nsi $newVersion dist\v$newVersion

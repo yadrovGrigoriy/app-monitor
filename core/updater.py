@@ -25,7 +25,8 @@ logger = setup_logger('core.updater')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
 
-# Версия берётся из pyproject.toml (единственный источник)
+# Версия зашивается в бинарник PyInstaller'ом.
+# При разработке читается из pyproject.toml.
 _pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
 if _pyproject.exists():
     import tomllib
@@ -33,7 +34,8 @@ if _pyproject.exists():
         _data = tomllib.load(_f)
     APP_VERSION = _data["project"]["version"]
 else:
-    APP_VERSION = "0.0.0"  # fallback для тестов
+    # Запасной вариант — зашитая версия (обновляется скриптом сборки)
+    APP_VERSION = "1.2.22"
 
 # Адрес сервера обновлений Admin UI
 ADMIN_SERVER_URL = "https://192.168.3.27:8766"

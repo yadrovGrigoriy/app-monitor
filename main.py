@@ -35,19 +35,21 @@ _appdata_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 
 
 SSL_CERT_FILE = next(
     (p for p in [
-        os.path.join(_script_dir, 'data', 'cert.pem'),
-        os.path.join(_exe_dir, 'data', 'cert.pem'),
-        os.path.join(_appdata_dir, 'data', 'cert.pem'),
+        os.path.join(_exe_dir, 'cert.pem'),          # рядом с exe (NSIS установка)
+        os.path.join(_exe_dir, 'data', 'cert.pem'),   # в подпапке data/
+        os.path.join(_script_dir, 'data', 'cert.pem'),# разработка
+        os.path.join(_appdata_dir, 'data', 'cert.pem'),# AppData
     ] if os.path.isfile(p)),
-    os.path.join(_script_dir, 'data', 'cert.pem')  # fallback
+    os.path.join(_exe_dir, 'cert.pem')  # fallback
 )
 SSL_KEY_FILE = next(
     (p for p in [
-        os.path.join(_script_dir, 'data', 'key.pem'),
-        os.path.join(_exe_dir, 'data', 'key.pem'),
-        os.path.join(_appdata_dir, 'data', 'key.pem'),
+        os.path.join(_exe_dir, 'key.pem'),           # рядом с exe (NSIS установка)
+        os.path.join(_exe_dir, 'data', 'key.pem'),    # в подпапке data/
+        os.path.join(_script_dir, 'data', 'key.pem'), # разработка
+        os.path.join(_appdata_dir, 'data', 'key.pem'),# AppData
     ] if os.path.isfile(p)),
-    os.path.join(_script_dir, 'data', 'key.pem')  # fallback
+    os.path.join(_exe_dir, 'key.pem')  # fallback
 )
 
 MUTEX_NAME = r'Global\AppMonitor_SingleInstance'
