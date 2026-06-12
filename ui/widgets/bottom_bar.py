@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QPushButton
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
 from PyQt5.QtCore import pyqtSignal
-
+from core.updater import APP_VERSION
 
 
 class BottomBar(QWidget):
@@ -32,6 +32,10 @@ class BottomBar(QWidget):
         layout.addWidget(self.btn_refresh)
 
         layout.addStretch()
+
+        self.lbl_version = QLabel(f'v{APP_VERSION}')
+        self.lbl_version.setStyleSheet('color: #616161; font-size: 11px; padding: 0 8px;')
+        layout.addWidget(self.lbl_version)
 
         self.btn_auth = QPushButton('🔒 Авторизация')
         self.btn_auth.clicked.connect(self.auth_clicked)

@@ -115,9 +115,11 @@ class AppMonitorAPI:
 
         @app.get("/api/status", response_model=StatusResponse)
         async def get_status():
+            from core.updater import APP_VERSION
             today_activity = self.db.get_today_activity()
             return StatusResponse(
                 status="ok",
+                version=APP_VERSION,
                 uptime_seconds=int(time.time() - (self._start_time or time.time())),
                 monitored_apps=len(today_activity),
             )
@@ -522,6 +524,9 @@ class AppMonitorAPI:
         _stop_mdns_service()
         if self._server:
             self._server.should_exit = True
+            # Подавляем ошибки asyncio при принудительном закрытии сокетов
+            import logging
+            logging.getLogger('asyncio').setLevel(logging.CRITICAL)
             logger.info("API сервер остановлен")
 
 

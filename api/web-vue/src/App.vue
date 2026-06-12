@@ -11,6 +11,7 @@ const router = useRouter()
 const isAuthenticated = ref(false)
 const initialLoading = ref(true)
 const serverStatus = ref('checking')
+const serverVersion = ref('')
 const uptime = ref(0)
 const stats = ref({ monitored_apps: 0, total_today: 0 })
 const apps = ref([])
@@ -36,6 +37,7 @@ async function loadStatus() {
   try {
     const data = await api.getStatus()
     serverStatus.value = data.status
+    serverVersion.value = data.version || ''
     uptime.value = data.uptime_seconds
     stats.value.monitored_apps = data.monitored_apps
   } catch { serverStatus.value = 'error' }
@@ -84,6 +86,7 @@ provide('limits', limits)
 provide('settings', settings)
 provide('loading', loading)
 provide('serverStatus', serverStatus)
+provide('serverVersion', serverVersion)
 provide('uptime', uptime)
 provide('refreshAll', refreshAll)
 provide('wsSend', send)
@@ -154,6 +157,7 @@ onUnmounted(() => {
     <LoginPage v-else-if="!isAuthenticated" @login-success="onLoginSuccess" />
     <AppLayout v-else
       :serverStatus="serverStatus"
+      :serverVersion="serverVersion"
       :uptime="uptime"
       :appsCount="apps.length"
       :limitsCount="limits.length"

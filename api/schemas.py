@@ -22,6 +22,7 @@ class SettingItem(BaseModel):
 
 class StatusResponse(BaseModel):
     status: str = "ok"
+    version: str = ""
     uptime_seconds: int = 0
     monitored_apps: int = 0
 

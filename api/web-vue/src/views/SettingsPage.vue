@@ -8,6 +8,7 @@ import { message } from 'ant-design-vue'
 const settings = inject('settings')
 const stats = inject('stats')
 const serverStatus = inject('serverStatus')
+const serverVersion = inject('serverVersion')
 const uptime = inject('uptime')
 const refreshAll = inject('refreshAll')
 
@@ -183,6 +184,9 @@ onMounted(loadAdmins)
 
     <a-card title="О системе" :bordered="false" style="margin-bottom:16px">
       <a-descriptions :column="1" size="small" bordered>
+        <a-descriptions-item label="Версия">
+          <a-typography-text code>v{{ serverVersion || '—' }}</a-typography-text>
+        </a-descriptions-item>
         <a-descriptions-item label="Статус сервера">
           <a-badge :status="serverStatus === 'ok' ? 'success' : 'error'" />
           {{ serverStatus }}

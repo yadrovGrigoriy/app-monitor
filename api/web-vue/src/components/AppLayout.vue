@@ -37,6 +37,7 @@ function navigate(key) {
 
 const props = defineProps({
   serverStatus: String,
+  serverVersion: String,
   uptime: Number,
   appsCount: Number,
   limitsCount: Number,
@@ -122,6 +123,10 @@ const navItems = [
             <a-badge :status="wsConnected ? 'success' : 'default'" />
             <span class="ws-label">{{ wsConnected ? 'WS: онлайн' : 'WS: офлайн' }}</span>
           </div>
+          <div class="version-info">
+            <SafetyCertificateOutlined />
+            <span class="version-label">v{{ serverVersion }}</span>
+          </div>
           <a-button size="small" @click="emit('logout')" block>
             <LogoutOutlined /> Выйти
           </a-button>
@@ -192,6 +197,8 @@ const navItems = [
 .menu-badge { margin-left: auto; }
 .ws-status { display: flex; align-items: center; gap: 8px; padding: 0 4px; color: rgba(255,255,255,.45); }
 .ws-label { font-size: 11px; }
+.version-info { display: flex; align-items: center; gap: 8px; padding: 0 4px; color: rgba(255,255,255,.35); }
+.version-label { font-size: 11px; }
 
 /* Мобильный хедер */
 .mobile-header {

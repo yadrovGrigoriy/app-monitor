@@ -19,6 +19,7 @@ from ui.dialogs.stats_dialog import StatsDialog
 from ui.styles import global_style, tab_table_style, COLOR_DANGER
 
 from core.logger import setup_logger
+from core.updater import APP_VERSION
 
 logger = setup_logger('ui.main_window')
 
@@ -54,7 +55,7 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         logger.debug('Инициализация UI')
-        self.setWindowTitle('Главная')
+        self.setWindowTitle(f'AppMonitor v{APP_VERSION}')
         self.setMinimumSize(720, 500)
         self.resize(900, 600)
         self.setStyleSheet(global_style())
