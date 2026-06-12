@@ -28,7 +28,7 @@ logger = setup_logger('api.admin_server')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
 
-APP_VERSION = "1.2.6"
+APP_VERSION = "1.2.16"
 APP_NAME = "AppMonitor"
 
 # Путь к папке с установщиками (собираются скриптом build_installer.ps1)
