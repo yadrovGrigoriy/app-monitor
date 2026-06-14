@@ -9,11 +9,23 @@ block_cipher = None
 a = Analysis(
     ['main.py'],
     pathex=[r'C:\code\AppMonitor'],
-    binaries=[],
+    binaries=[
+        (r'C:\Program Files\Python\DLLs\pyexpat.pyd', '.'),
+        (r'C:\code\AppMonitor\.venv\Lib\site-packages\matplotlib\ft2font.cp314-win_amd64.pyd', 'matplotlib'),
+        (r'C:\code\AppMonitor\.venv\Lib\site-packages\matplotlib\_c_internal_utils.cp314-win_amd64.pyd', 'matplotlib'),
+        (r'C:\code\AppMonitor\.venv\Lib\site-packages\matplotlib\_image.cp314-win_amd64.pyd', 'matplotlib'),
+        (r'C:\code\AppMonitor\.venv\Lib\site-packages\matplotlib\_path.cp314-win_amd64.pyd', 'matplotlib'),
+        (r'C:\code\AppMonitor\.venv\Lib\site-packages\matplotlib\_qhull.cp314-win_amd64.pyd', 'matplotlib'),
+        (r'C:\code\AppMonitor\.venv\Lib\site-packages\matplotlib\_tri.cp314-win_amd64.pyd', 'matplotlib'),
+    ],
     datas=[
         ('api/web', 'api/web'),
+        ('version.txt', '.'),
     ],
     hiddenimports=[
+        'win32event',
+        'win32api',
+        'winerror',
         'PyQt5.sip',
         'qdarktheme',
         'core.database',
@@ -47,6 +59,8 @@ a = Analysis(
         'ui.dialogs.update_dialog',
         'api.server',
         'api.schemas',
+        'unicodedata',
+        'pyexpat',
     ],
     hookspath=[],
     hooksconfig={},

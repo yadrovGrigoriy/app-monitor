@@ -19,34 +19,39 @@ Write-Host ""
 
 # ─── Автоинкремент версии ────────────────────────────────────────────
 function Update-Version {
+    $versionFilePath = "version.txt"
     $pyprojectPath = "pyproject.toml"
-    $content = Get-Content $pyprojectPath -Raw
 
-    if ($content -match 'version = "(\d+)\.(\d+)\.(\d+)"') {
+    # Читаем текущую версию из version.txt
+    if (-not (Test-Path $versionFilePath)) {
+        Write-Host "[ОШИБКА] version.txt не найден" -ForegroundColor Red
+        exit 1
+    }
+    $currentVersion = (Get-Content $versionFilePath -Raw).Trim()
+
+    if ($currentVersion -match '^(\d+)\.(\d+)\.(\d+)$') {
         $major = [int]$Matches[1]
         $minor = [int]$Matches[2]
         $patch = [int]$Matches[3] + 1
         $newVersion = "$major.$minor.$patch"
 
-        Write-Host "Повышаю версию: $($Matches[0]) -> $newVersion" -ForegroundColor Yellow
+        Write-Host "Повышаю версию: $currentVersion -> $newVersion" -ForegroundColor Yellow
+
+        # Обновляем version.txt
+        Set-Content $versionFilePath -Value $newVersion -NoNewline
 
         # Обновляем pyproject.toml
-        $content = $content -replace 'version = "[\d.]+', "version = `"$newVersion"
-        Set-Content $pyprojectPath -Value $content -NoNewline
+        $pyprojectContent = Get-Content $pyprojectPath -Raw
+        $pyprojectContent = $pyprojectContent -replace 'version = "[\d.]+', "version = `"$newVersion"
+        Set-Content $pyprojectPath -Value $pyprojectContent -NoNewline
 
-        # Обновляем core/updater.py (зашитая версия для PyInstaller)
-        $updaterPath = "core\updater.py"
-        $updaterContent = Get-Content $updaterPath -Raw
-        $updaterContent = $updaterContent -replace 'APP_VERSION = "[\d.]+', "APP_VERSION = `"$newVersion"
-        Set-Content $updaterPath -Value $updaterContent -NoNewline
-
-        # Обновляем installer/installer.nsi (через Python для CP1251)
-        python scripts/patch_nsi.py installer/installer.nsi $newVersion dist\v$newVersion
+        # Генерируем installer/installer.nsi из шаблона (версия из version.txt)
+        python scripts/patch_nsi.py
 
         Write-Host "[OK] Версия обновлена до $newVersion" -ForegroundColor Green
         return $newVersion
     } else {
-        Write-Host "[ОШИБКА] Не удалось найти версию в pyproject.toml" -ForegroundColor Red
+        Write-Host "[ОШИБКА] Не удалось распознать версию в version.txt: '$currentVersion'" -ForegroundColor Red
         exit 1
     }
 }
@@ -79,10 +84,6 @@ $versionFolder = "dist\v$newVersion"
 $tempFolder = "dist\.temp_build"
 New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
 Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
-
-# Обновляем installer/installer.nsi — OutFile и File в версионную папку
-python scripts/patch_nsi.py installer/installer.nsi $newVersion $versionFolder
-Write-Host "[INFO] installer.nsi: OutFile и File -> $versionFolder" -ForegroundColor Gray
 
 # ─── Сборка Vue.js веб-интерфейса ────────────────────────────────────
 try {
@@ -118,7 +119,7 @@ try {
     }
     # Перемещаем в версионную папку
     Move-Item -Path $exeTemp -Destination "$versionFolder\AppMonitor.exe" -Force
-    $exeSize = (Get-Item $exeSource).Length
+    $exeSize = (Get-Item "$versionFolder\AppMonitor.exe").Length
     Write-Host "  [OK] AppMonitor.exe собран ($('{0:N2}' -f ($exeSize / 1MB)) MB)" -ForegroundColor Green
 }
 catch {

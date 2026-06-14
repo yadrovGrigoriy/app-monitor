@@ -22,8 +22,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from core.logger import setup_logger
+from core.logger import setup_logger, LOG_DIR
 from core.updater import APP_VERSION
+from core.database import Database
 
 logger = setup_logger('api.admin_server')
 
@@ -35,6 +36,20 @@ APP_NAME = "AppMonitor"
 DIST_DIR = Path(__file__).resolve().parent.parent / "dist"
 
 # ─── Схемы ───────────────────────────────────────────────────────────
+
+
+class UpdateRecordRequest(BaseModel):
+    """Запрос на добавление записи об обновлении."""
+    old_version: str
+    new_version: str
+
+
+class UpdateRecordResponse(BaseModel):
+    """Ответ с записью об обновлении."""
+    id: int
+    date: str
+    old_version: str
+    new_version: str
 
 
 class UpdateCheckResponse(BaseModel):
@@ -63,6 +78,9 @@ app = FastAPI(
     version=APP_VERSION,
     description="Сервер обновлений для удалённого администрирования AppMonitor",
 )
+
+# Подключаем БД для истории обновлений
+_db = Database()
 
 
 def _find_installer(version: str | None = None) -> Path | None:
@@ -264,6 +282,91 @@ def status():
         "installers_count": len(list(DIST_DIR.glob("AppMonitor_Setup_*.exe"))),
         "platform": platform.system(),
         "hostname": platform.node(),
+    }
+
+
+# ─── Логи приложения ────────────────────────────────────────────────
+
+
+@app.get("/api/logs")
+def list_logs():
+    """Список доступных лог-файлов."""
+    if not os.path.isdir(LOG_DIR):
+        return {"logs": [], "count": 0}
+
+    files = []
+    for f in sorted(os.listdir(LOG_DIR), reverse=True):
+        fpath = os.path.join(LOG_DIR, f)
+        if os.path.isfile(fpath):
+            files.append({
+                "filename": f,
+                "size_bytes": os.path.getsize(fpath),
+                "modified": datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat(),
+            })
+    return {"logs": files, "count": len(files), "log_dir": LOG_DIR}
+
+
+@app.get("/api/logs/{filename}")
+def read_log(filename: str, tail: int = 0):
+    """Прочитать содержимое лог-файла.
+
+    Args:
+        filename: Имя файла (только имя, без пути)
+        tail: Если > 0 — вернуть только последние N строк
+    """
+    # Защита от path traversal
+    safe_name = os.path.basename(filename)
+    fpath = os.path.join(LOG_DIR, safe_name)
+
+    if not os.path.isfile(fpath):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Лог-файл '{safe_name}' не найден в {LOG_DIR}",
+        )
+
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+
+        total = len(lines)
+        if tail > 0:
+            lines = lines[-tail:]
+
+        return {
+            "filename": safe_name,
+            "path": fpath,
+            "total_lines": total,
+            "returned_lines": len(lines),
+            "content": "".join(lines),
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка чтения лог-файла: {e}",
+        )
+
+
+# ─── История обновлений ──────────────────────────────────────────────
+
+
+@app.post("/api/update/history", response_model=UpdateRecordResponse)
+def add_update_record(req: UpdateRecordRequest):
+    """Добавить запись об обновлении."""
+    _db.add_update_record(req.old_version, req.new_version)
+    last = _db.get_last_update()
+    if not last:
+        raise HTTPException(status_code=500, detail="Не удалось сохранить запись")
+    return UpdateRecordResponse(**last)
+
+
+@app.get("/api/update/history")
+def get_update_history(limit: int = 50):
+    """Получить историю обновлений."""
+    records = _db.get_update_history(limit)
+    return {
+        "records": records,
+        "count": len(records),
+        "last_update": records[0] if records else None,
     }
 
 

@@ -441,6 +441,29 @@ class AppMonitorAPI:
                 media_type="application/x-msdownload",
             )
 
+        # ─── История обновлений ────────────────────────────────────
+        @app.get("/api/update/history")
+        async def get_update_history(limit: int = 50):
+            """Получить историю обновлений."""
+            records = self.db.get_update_history(limit)
+            return {
+                "records": records,
+                "count": len(records),
+                "last_update": records[0] if records else None,
+            }
+
+        @app.post("/api/update/history")
+        async def add_update_record(req: dict, authorization: str = Header("")):
+            """Добавить запись об обновлении."""
+            _require_auth(authorization)
+            old_version = req.get("old_version", "")
+            new_version = req.get("new_version", "")
+            if not old_version or not new_version:
+                raise HTTPException(status_code=400, detail="old_version и new_version обязательны")
+            self.db.add_update_record(old_version, new_version)
+            last = self.db.get_last_update()
+            return last or {"status": "ok"}
+
         # ─── Загрузка обновления ────────────────────────────────────
         @app.post("/api/update/upload")
         async def upload_update(file: UploadFile = File(...), authorization: str = Header("")):
@@ -450,8 +473,8 @@ class AppMonitorAPI:
             if not file.filename or not file.filename.endswith(".exe"):
                 raise HTTPException(status_code=400, detail="Требуется .exe файл")
 
-            # Сохраняем в dist/ рядом с проектом
-            installer_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
+            # Сохраняем рядом с исполняемым файлом (туда же смотрит apply_local_update)
+            installer_dir = os.path.dirname(sys.executable)
             os.makedirs(installer_dir, exist_ok=True)
 
             # Извлекаем версию из имени файла: AppMonitor_Setup_X.X.X.exe

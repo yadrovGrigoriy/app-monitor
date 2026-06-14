@@ -124,6 +124,26 @@ export const api = {
     })
   },
 
+  getUpdateHistory(limit = 50) {
+    return request(`/api/update/history?limit=${limit}`)
+  },
+
+  addUpdateRecord(oldVersion, newVersion) {
+    return request('/api/update/history', {
+      method: 'POST',
+      body: JSON.stringify({ old_version: oldVersion, new_version: newVersion }),
+    })
+  },
+
+  getLogs() {
+    return request('/api/logs')
+  },
+
+  getLogContent(filename, tail = 0) {
+    const tailParam = tail > 0 ? `?tail=${tail}` : ''
+    return request(`/api/logs/${encodeURIComponent(filename)}${tailParam}`)
+  },
+
   uploadUpdate(file, onProgress) {
     return new Promise((resolve, reject) => {
       const formData = new FormData()

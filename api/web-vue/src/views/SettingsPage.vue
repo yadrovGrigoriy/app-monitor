@@ -2,7 +2,7 @@
 import { ref, inject, onMounted } from 'vue'
 import { api } from '../api'
 import { formatUptime } from '../utils'
-import { DeleteOutlined, UserAddOutlined, CloudUploadOutlined } from '@ant-design/icons-vue'
+import { DeleteOutlined, UserAddOutlined, CloudUploadOutlined, HistoryOutlined, DownOutlined, UpOutlined, FileTextOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 
 const settings = inject('settings')
@@ -17,6 +17,101 @@ const newAdminUsername = ref('')
 const newAdminPassword = ref('')
 const newAdminPasswordConfirm = ref('')
 const showAddForm = ref(false)
+
+// ─── История обновлений ────────────────────────────────────────
+const updateHistory = ref([])
+const updateHistoryLoading = ref(false)
+const showAllUpdates = ref(false)
+
+async function loadUpdateHistory() {
+  updateHistoryLoading.value = true
+  try {
+    const data = await api.getUpdateHistory(50)
+    updateHistory.value = data.records || []
+  } catch (e) {
+    console.error('Ошибка загрузки истории обновлений:', e)
+  } finally {
+    updateHistoryLoading.value = false
+  }
+}
+
+function formatDate(isoStr) {
+  if (!isoStr) return '—'
+  try {
+    const d = new Date(isoStr)
+    return d.toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return isoStr
+  }
+}
+
+// ─── Логи приложения ───────────────────────────────────────────
+const logs = ref([])
+const logsLoading = ref(false)
+const selectedLog = ref(null)
+const logContent = ref('')
+const logContentLoading = ref(false)
+const logTail = ref(100)
+
+async function loadLogs() {
+  logsLoading.value = true
+  try {
+    const data = await api.getLogs()
+    logs.value = data.logs || []
+  } catch (e) {
+    console.error('Ошибка загрузки логов:', e)
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+async function selectLog(filename) {
+  selectedLog.value = filename
+  logContentLoading.value = true
+  try {
+    const data = await api.getLogContent(filename, logTail.value)
+    logContent.value = data.content || ''
+  } catch (e) {
+    logContent.value = `Ошибка загрузки: ${e.message}`
+  } finally {
+    logContentLoading.value = false
+  }
+}
+
+async function refreshLog() {
+  if (selectedLog.value) {
+    await selectLog(selectedLog.value)
+  }
+}
+
+function formatLogSize(bytes) {
+  if (!bytes) return '—'
+  if (bytes < 1024) return `${bytes} Б`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`
+}
+
+function formatLogDate(isoStr) {
+  if (!isoStr) return '—'
+  try {
+    const d = new Date(isoStr)
+    return d.toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return isoStr
+  }
+}
 
 // ─── Загрузка обновления ────────────────────────────────────────
 const uploading = ref(false)
@@ -106,7 +201,11 @@ async function handleClear() {
   }
 }
 
-onMounted(loadAdmins)
+onMounted(() => {
+  loadAdmins()
+  loadUpdateHistory()
+  loadLogs()
+})
 </script>
 
 <template>
@@ -249,7 +348,143 @@ onMounted(loadAdmins)
       </div>
     </a-card>
 
-    <a-card title="Опасная зона" :bordered="false" class="card-danger">
+    <a-card title="История обновлений" :bordered="false" style="margin-bottom:16px">
+      <a-alert
+        v-if="updateHistory.length > 0"
+        type="success" show-icon style="margin-bottom:16px">
+        <template #message>
+          <strong>Последнее обновление:</strong>
+          {{ formatDate(updateHistory[0].date) }} —
+          {{ updateHistory[0].old_version }} →
+          <strong>{{ updateHistory[0].new_version }}</strong>
+        </template>
+      </a-alert>
+
+      <a-alert
+        v-else
+        message="История обновлений пуста"
+        description="Записи об обновлениях появятся здесь после установки новой версии."
+        type="info" show-icon style="margin-bottom:16px" />
+
+      <a-button
+        v-if="updateHistory.length > 1"
+        type="link"
+        @click="showAllUpdates = !showAllUpdates"
+        style="padding:0; margin-bottom:12px"
+      >
+        <HistoryOutlined />
+        {{ showAllUpdates ? 'Скрыть историю' : 'Показать всю историю' }}
+        <DownOutlined v-if="!showAllUpdates" />
+        <UpOutlined v-else />
+      </a-button>
+
+      <a-table
+        v-if="showAllUpdates && updateHistory.length > 0"
+        :dataSource="updateHistory"
+        :columns="[
+          { title: 'Дата', dataIndex: 'date', key: 'date' },
+          { title: 'Старая версия', dataIndex: 'old_version', key: 'old_version' },
+          { title: 'Новая версия', dataIndex: 'new_version', key: 'new_version' },
+        ]"
+        :pagination="false"
+        size="small"
+        rowKey="id"
+        :loading="updateHistoryLoading"
+        :locale="{ emptyText: 'Нет записей' }"
+      >
+        <template #bodyCell="{ column, text }">
+          <template v-if="column.key === 'date'">
+            {{ formatDate(text) }}
+          </template>
+          <template v-if="column.key === 'new_version'">
+            <a-tag color="blue">{{ text }}</a-tag>
+          </template>
+        </template>
+      </a-table>
+    </a-card>
+
+    <a-card title="Логи приложения" :bordered="false" style="margin-bottom:16px">
+      <a-alert
+        message="Просмотр логов AppMonitor"
+        description="Логи пишутся в %APPDATA%\AppMonitor\logs. Выберите файл для просмотра."
+        type="info" show-icon style="margin-bottom:16px" />
+
+      <div style="display:flex; gap:12px; margin-bottom:12px; flex-wrap:wrap">
+        <a-select
+          v-model:value="logTail"
+          style="width:120px"
+          :options="[
+            { value: 50, label: '50 строк' },
+            { value: 100, label: '100 строк' },
+            { value: 200, label: '200 строк' },
+            { value: 500, label: '500 строк' },
+            { value: 0, label: 'Весь файл' },
+          ]"
+        />
+        <a-button @click="refreshLog" :disabled="!selectedLog" :loading="logContentLoading">
+          <ReloadOutlined /> Обновить
+        </a-button>
+      </div>
+
+      <div style="display:flex; gap:16px; flex-wrap:wrap">
+        <!-- Список лог-файлов -->
+        <div style="min-width:280px; flex:1">
+          <a-table
+            :dataSource="logs"
+            :columns="[
+              { title: 'Файл', dataIndex: 'filename', key: 'filename' },
+              { title: 'Размер', key: 'size', width: 90 },
+              { title: 'Изменён', key: 'modified', width: 150 },
+            ]"
+            :pagination="false"
+            size="small"
+            rowKey="filename"
+            :loading="logsLoading"
+            :locale="{ emptyText: 'Лог-файлы не найдены' }"
+            :rowSelection="{ type: 'radio', selectedRowKeys: selectedLog ? [selectedLog] : [], onSelect: (record) => selectLog(record.filename) }"
+            @rowClick="(record) => selectLog(record.filename)"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'size'">
+                {{ formatLogSize(record.size_bytes) }}
+              </template>
+              <template v-if="column.key === 'modified'">
+                {{ formatLogDate(record.modified) }}
+              </template>
+            </template>
+          </a-table>
+        </div>
+
+        <!-- Содержимое лога -->
+        <div style="flex:2; min-width:400px">
+          <a-card
+            :title="selectedLog || 'Выберите файл'"
+            size="small"
+            :loading="logContentLoading"
+          >
+            <pre
+              v-if="logContent"
+              style="
+                background:#1e1e1e;
+                color:#d4d4d4;
+                padding:12px;
+                border-radius:6px;
+                font-size:12px;
+                line-height:1.5;
+                max-height:500px;
+                overflow:auto;
+                white-space:pre-wrap;
+                word-break:break-all;
+                margin:0;
+              "
+            >{{ logContent }}</pre>
+            <a-empty v-else description="Выберите лог-файл слева" />
+          </a-card>
+        </div>
+      </div>
+    </a-card>
+
+    <a-card title="Опасная зона" :bordered="false" style="margin-bottom:16px" class="card-danger">
       <a-alert
         message="Сброс всех данных"
         description="Удалит всю активность, лимиты и настройки. Действие необратимо."

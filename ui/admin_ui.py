@@ -149,6 +149,17 @@ class AdminClient:
     def sync_admins(self, admins: list[dict]):
         return self._post("/api/admins/sync", admins)
 
+    def get_update_history(self, limit: int = 50) -> dict:
+        """Получить историю обновлений."""
+        return self._get(f"/api/update/history?limit={limit}")
+
+    def add_update_record(self, old_version: str, new_version: str) -> dict:
+        """Добавить запись об обновлении."""
+        return self._post("/api/update/history", {
+            "old_version": old_version,
+            "new_version": new_version,
+        })
+
 
 class _AdminLoginDialog(QDialog):
     """Диалог входа для удалённого администрирования."""
@@ -233,6 +244,7 @@ class AdminUI(BaseUI):
         self._add_connection_panel()
         self._add_date_picker()
         self._apply_role_restrictions()
+        self._add_update_tab()
         # Показываем диалог выбора при запуске
         QTimer.singleShot(500, self._show_startup_dialog)
         logger.info('AdminUI.__init__: завершено')
@@ -804,6 +816,8 @@ class AdminUI(BaseUI):
             logger.info('AdminUI._connect: авторизация успешна, обновляем данные')
             # Сохраняем адрес в историю
             self._save_server_address(address)
+            # Логирование обновления: проверяем версию сервера
+            self._log_update_if_needed(status)
             self._refresh_all()
             self._connect_ws()
         except Exception as e:
@@ -836,6 +850,20 @@ class AdminUI(BaseUI):
                 logger.info(f'Администраторы синхронизированы: {len(remote_admins)}')
         except Exception as e:
             logger.warning(f'Ошибка синхронизации администраторов: {e}')
+
+    def _log_update_if_needed(self, status: dict):
+        """Проверить версию сервера и записать обновление в историю, если версия изменилась."""
+        try:
+            server_version = status.get('version', '')
+            if not server_version:
+                return
+            prev_version = self.api.get_setting('app_version', '')
+            if prev_version and prev_version != server_version:
+                logger.info(f'Обнаружено обновление сервера: {prev_version} -> {server_version}')
+                self.api.add_update_record(prev_version, server_version)
+            self.api.set_setting('app_version', server_version)
+        except Exception as e:
+            logger.warning(f'Ошибка логирования обновления: {e}')
 
     def _connect_ws(self):
         """Подключение к WebSocket."""

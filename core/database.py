@@ -1,12 +1,16 @@
 import sqlite3
 import os
+import sys
 import datetime
 from core.logger import setup_logger
 
 logger = setup_logger('core.database')
 
-# Приоритет: папка рядом с exe (для разработки), иначе %APPDATA%
-_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Приоритет: папка рядом с exe (PyInstaller), иначе рядом с проектом (разработка), иначе %APPDATA%
+if getattr(sys, 'frozen', False):
+    _base = os.path.dirname(sys.executable)
+else:
+    _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if not os.access(_base, os.W_OK):
     _base = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'AppMonitor')
 
@@ -65,6 +69,11 @@ class Database:
                 '  id INTEGER PRIMARY KEY AUTOINCREMENT,'
                 '  date TEXT NOT NULL UNIQUE,'
                 '  total_seconds INTEGER NOT NULL DEFAULT 0)',
+                'CREATE TABLE IF NOT EXISTS update_history ('
+                '  id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                '  date TEXT NOT NULL,'
+                '  old_version TEXT NOT NULL,'
+                '  new_version TEXT NOT NULL)',
             ]
             for stmt in statements:
                 try:
@@ -673,7 +682,7 @@ class Database:
             if row is None:
                 conn.execute(
                     'INSERT OR IGNORE INTO admins (username, password_hash) VALUES (?, ?)',
-                    ('admin', '29e5cf5a72ac95d426970f99acf4f993:23222bf7ff73e41836baa84b00b8a381163de1bc467f2db87331283021b1087c')
+('admin', '1d5411a1740daae1ad5e803e6fcfd0cd:5e10cb6a1ab1b8e9a7c210df1e4657442efa5585358745ef775f7fd728217d9d')
                 )
                 conn.commit()
                 logger.info('Создан администратор по умолчанию: admin')
@@ -749,6 +758,52 @@ class Database:
                 )
             conn.commit()
             logger.info(f'Администраторы синхронизированы: {len(admins)} записей')
+        finally:
+            conn.close()
+
+    # --- История обновлений ---
+
+    def add_update_record(self, old_version: str, new_version: str):
+        """Добавить запись об обновлении."""
+        conn = self._get_connection()
+        try:
+            now = datetime.datetime.now().isoformat()
+            conn.execute(
+                'INSERT INTO update_history (date, old_version, new_version) VALUES (?, ?, ?)',
+                (now, old_version, new_version)
+            )
+            conn.commit()
+            logger.info(f'Запись обновления: {old_version} -> {new_version}')
+        finally:
+            conn.close()
+
+    def get_update_history(self, limit: int = 50) -> list:
+        """Получить историю обновлений.
+
+        Args:
+            limit: Максимальное количество записей (по умолчанию 50)
+
+        Returns:
+            Список словарей с ключами: id, date, old_version, new_version
+        """
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                'SELECT * FROM update_history ORDER BY id DESC LIMIT ?',
+                (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_last_update(self) -> dict | None:
+        """Получить последнюю запись об обновлении."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                'SELECT * FROM update_history ORDER BY id DESC LIMIT 1'
+            ).fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 

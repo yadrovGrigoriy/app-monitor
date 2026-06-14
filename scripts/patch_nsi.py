@@ -1,37 +1,57 @@
-"""Патч installer.nsi: обновить версию и пути."""
+"""
+Генерация installer.nsi из шаблона installer.template.nsi.
+
+Версия читается из version.txt (единственный источник правды).
+Путь к папке сборки формируется автоматически из версии.
+
+Использование:
+    python scripts/patch_nsi.py
+"""
+
+import os
 import re
 import sys
 
-path = sys.argv[1]
-new_version = sys.argv[2]
-version_folder = sys.argv[3].replace('/', '\\')  # например dist\v1.2.21
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEMPLATE_PATH = os.path.join(PROJECT_ROOT, "installer", "installer.template.nsi")
+OUTPUT_PATH = os.path.join(PROJECT_ROOT, "installer", "installer.nsi")
+VERSION_FILE = os.path.join(PROJECT_ROOT, "version.txt")
 
-with open(path, 'rb') as f:
-    data = f.read()
 
-# Обновляем версию
-data = re.sub(
-    rb'!define PRODUCT_VERSION "[\d.]+"',
-    f'!define PRODUCT_VERSION "{new_version}"'.encode('cp1251'),
-    data
-)
+def read_version() -> str:
+    """Прочитать версию из version.txt."""
+    try:
+        with open(VERSION_FILE, "r", encoding="utf-8") as f:
+            version = f.readline().strip()
+            if not version:
+                print("ОШИБКА: version.txt пуст")
+                sys.exit(1)
+            if not re.match(r"^\d+\.\d+\.\d+$", version):
+                print(f"ОШИБКА: неверный формат версии в version.txt: '{version}'")
+                sys.exit(1)
+            return version
+    except FileNotFoundError:
+        print(f"ОШИБКА: файл {VERSION_FILE} не найден")
+        sys.exit(1)
 
-# Обновляем OutFile (заменяем любой путь до AppMonitor_Setup_)
-version_folder_escaped = version_folder.replace('\\', '\\\\')
-data = re.sub(
-    rb'..\\(?:dist(?:\\v[\d.]+)?)\\AppMonitor_Setup_',
-    f'..\\\\{version_folder_escaped}\\\\AppMonitor_Setup_'.encode('cp1251'),
-    data
-)
 
-# Обновляем File (заменяем любой путь до AppMonitor.exe)
-data = re.sub(
-    rb'..\\(?:dist(?:\\v[\d.]+)?)\\AppMonitor\.exe',
-    f'..\\\\{version_folder_escaped}\\\\AppMonitor.exe'.encode('cp1251'),
-    data
-)
+def generate_nsi(version: str) -> None:
+    """Сгенерировать installer.nsi из шаблона, подставив версию."""
+    if not os.path.exists(TEMPLATE_PATH):
+        print(f"ОШИБКА: шаблон {TEMPLATE_PATH} не найден")
+        sys.exit(1)
 
-with open(path, 'wb') as f:
-    f.write(data)
+    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        template = f.read()
 
-print(f'OK: {path} patched to v{new_version} in {version_folder}')
+    content = template.replace("__VERSION__", version)
+
+    with open(OUTPUT_PATH, "w", encoding="cp1251") as f:
+        f.write(content)
+
+    print(f"OK: {OUTPUT_PATH} сгенерирован (версия {version}, кодировка cp1251)")
+
+
+if __name__ == "__main__":
+    version = read_version()
+    generate_nsi(version)

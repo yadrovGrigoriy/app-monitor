@@ -9,6 +9,22 @@
 
 import sys
 import os
+
+# ─── Очистка lock-файла от предыдущего запуска ──────────────────────
+# PyInstaller с console=False создаёт 2 процесса (загрузчик + дочерний),
+# поэтому блокирующая проверка единственного экземпляра не работает.
+# Просто удаляем старый lock-файл, если он есть.
+import tempfile
+
+_LOCK_FILE = os.path.join(tempfile.gettempdir(), 'AppMonitor.lock')
+try:
+    if os.path.exists(_LOCK_FILE):
+        os.remove(_LOCK_FILE)
+except Exception:
+    pass
+
+# ─── Основные импорты ────────────────────────────────────────────────
+
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import QTimer
 from ui.app_ui import AppUI
@@ -53,78 +69,27 @@ SSL_KEY_FILE = next(
     os.path.join(_exe_dir, 'key.pem')  # fallback
 )
 
-MUTEX_NAME = r'Global\AppMonitor_SingleInstance'
-
-
-def _check_single_instance() -> bool:
-    """Проверить, не запущен ли уже экземпляр монитора."""
-    try:
-        import psutil
-        import time
-        current_pid = os.getpid()
-        current_exe = sys.executable.lower()
-        current_create_time = psutil.Process(current_pid).create_time()
-
-        for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline', 'create_time']):
-            try:
-                pid = proc.info['pid']
-                if pid == current_pid:
-                    continue
-                exe = (proc.info['exe'] or '').lower()
-                if exe != current_exe:
-                    continue
-                name = (proc.info['name'] or '').lower()
-                if name not in ('python.exe', 'pythonw.exe'):
-                    continue
-                cmdline = ' '.join(proc.info['cmdline'] or []).lower()
-                if 'main.py' not in cmdline and 'run_app.py' not in cmdline:
-                    continue
-                proc_create_time = proc.info['create_time']
-                if proc_create_time and current_create_time - proc_create_time > 1.0:
-                    logger.info(f'Убиваем старый процесс PID={pid} (запущен раньше)')
-                    proc.kill()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-
-        import win32event
-        import win32api
-        import winerror
-        mutex = win32event.CreateMutex(None, False, MUTEX_NAME)
-        last_error = win32api.GetLastError()
-        if last_error == winerror.ERROR_ALREADY_EXISTS:
-            logger.warning('Mutex занят, ждём освобождения...')
-            for _ in range(30):
-                time.sleep(0.2)
-                win32api.CloseHandle(mutex)
-                mutex = win32event.CreateMutex(None, False, MUTEX_NAME)
-                last_error = win32api.GetLastError()
-                if last_error != winerror.ERROR_ALREADY_EXISTS:
-                    logger.info('Mutex освобождён, продолжаем')
-                    return True
-            logger.error('Не удалось дождаться освобождения mutex')
-            return False
-        else:
-            logger.info(f'Первый запуск (mutex создан, last_error={last_error})')
-            return True
-    except ImportError:
-        logger.warning('win32api/psutil не доступен, проверка единственного экземпляра пропущена')
-        return True
-
 
 def main():
     logger.info('=== AppMonitor запуск ===')
     logger.info(f'Python: {sys.version}')
     logger.info(f'Platform: {sys.platform}')
 
-    if not _check_single_instance():
-        logger.error('Не удалось убить старый экземпляр, завершение')
-        QMessageBox.critical(None, 'Ошибка', 'Не удалось убить старый экземпляр AppMonitor!')
-        sys.exit(1)
+    # Удаление старых установщиков после обновления
+    _cleanup_dir = _exe_dir
+    try:
+        for _f in os.listdir(_cleanup_dir):
+            if _f.startswith('AppMonitor_Setup_') and _f.endswith('.exe'):
+                fpath = os.path.join(_cleanup_dir, _f)
+                try:
+                    os.remove(fpath)
+                    logger.info(f'Удалён установщик после обновления: {_f}')
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     if os.name == 'nt':
-        import ctypes
-        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-        logger.debug('Консольное окно скрыто')
         import PyQt5.QtCore
         plugins_path = os.path.join(os.path.dirname(PyQt5.QtCore.__file__), 'Qt5', 'plugins')
         if os.path.isdir(plugins_path):
@@ -151,6 +116,13 @@ def main():
 
     db = Database()
     logger.info('База данных инициализирована')
+
+    # Логирование обновления: если версия изменилась — записываем в историю
+    _prev_version = db.get_setting('app_version', '')
+    if _prev_version and _prev_version != APP_VERSION:
+        logger.info(f'Обнаружено обновление: {_prev_version} -> {APP_VERSION}')
+        db.add_update_record(_prev_version, APP_VERSION)
+    db.set_setting('app_version', APP_VERSION)
 
     saved_theme = db.get_setting(THEME_SETTING_KEY, THEME_LIGHT)
     apply_theme(app, saved_theme)
@@ -189,7 +161,7 @@ def main():
     def _auto_update():
         try:
             from core.updater import apply_local_update
-            apply_local_update()  # если есть обновление — запустит установщик и завершит процесс
+            apply_local_update(db)  # если есть обновление — запишет в БД, запустит установщик и завершит процесс
         except Exception as e:
             logger.debug(f'Ошибка автообновления: {e}')
 
