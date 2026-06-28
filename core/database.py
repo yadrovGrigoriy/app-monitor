@@ -6,15 +6,14 @@ from core.logger import setup_logger
 
 logger = setup_logger('core.database')
 
-# Приоритет: папка рядом с exe (PyInstaller), иначе рядом с проектом (разработка), иначе %APPDATA%
-if getattr(sys, 'frozen', False):
-    _base = os.path.dirname(sys.executable)
-else:
-    _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if not os.access(_base, os.W_OK):
-    _base = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'AppMonitor')
-
-DB_PATH = os.path.join(_base, 'data', 'app_monitor.db')
+# База данных всегда хранится в %APPDATA%\AppMonitor\data\app_monitor.db
+# Program Files недоступен для записи обычному пользователю, а после перезагрузки
+# приложение запускается без прав администратора.
+_APPDATA_DIR = os.path.join(
+    os.environ.get('APPDATA', os.path.expanduser('~')),
+    'AppMonitor'
+)
+DB_PATH = os.path.join(_APPDATA_DIR, 'data', 'app_monitor.db')
 
 
 class Database:
@@ -74,6 +73,12 @@ class Database:
                 '  date TEXT NOT NULL,'
                 '  old_version TEXT NOT NULL,'
                 '  new_version TEXT NOT NULL)',
+                'CREATE TABLE IF NOT EXISTS messages ('
+                '  id INTEGER PRIMARY KEY AUTOINCREMENT,'
+                '  text TEXT NOT NULL,'
+                '  sender TEXT NOT NULL CHECK(sender IN ("admin", "user")),'
+                '  created_at TEXT NOT NULL,'
+                '  is_read INTEGER NOT NULL DEFAULT 0)',
             ]
             for stmt in statements:
                 try:
@@ -729,6 +734,7 @@ class Database:
             conn.execute('DELETE FROM excluded_apps')
             conn.execute('DELETE FROM settings')
             conn.execute('DELETE FROM appmonitor_uptime')
+            conn.execute('DELETE FROM messages')
             conn.execute('DELETE FROM admins')
             conn.commit()
             logger.info('Все пользовательские данные очищены')
@@ -804,6 +810,80 @@ class Database:
                 'SELECT * FROM update_history ORDER BY id DESC LIMIT 1'
             ).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    # --- Сообщения (чат) ---
+
+    def add_message(self, text: str, sender: str) -> dict:
+        """Добавить сообщение в БД.
+
+        Args:
+            text: Текст сообщения
+            sender: 'admin' или 'user'
+
+        Returns:
+            Словарь с данными созданного сообщения
+        """
+        conn = self._get_connection()
+        try:
+            now = datetime.datetime.now().isoformat()
+            cursor = conn.execute(
+                'INSERT INTO messages (text, sender, created_at, is_read) VALUES (?, ?, ?, 0)',
+                (text, sender, now)
+            )
+            conn.commit()
+            msg_id = cursor.lastrowid
+            logger.info(f'Сообщение #{msg_id} сохранено (sender={sender}): {text[:50]}...')
+            return {
+                'id': msg_id,
+                'text': text,
+                'sender': sender,
+                'created_at': now,
+                'is_read': False,
+            }
+        finally:
+            conn.close()
+
+    def get_pending_messages(self) -> list:
+        """Получить все непрочитанные сообщения."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                'SELECT * FROM messages WHERE is_read = 0 ORDER BY id ASC'
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def mark_message_as_read(self, message_id: int):
+        """Отметить сообщение как прочитанное."""
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                'UPDATE messages SET is_read = 1 WHERE id = ?', (message_id,)
+            )
+            conn.commit()
+            logger.debug(f'Сообщение #{message_id} отмечено как прочитанное')
+        finally:
+            conn.close()
+
+    def get_message_history(self, limit: int = 100) -> list:
+        """Получить историю сообщений.
+
+        Args:
+            limit: Максимальное количество сообщений
+
+        Returns:
+            Список словарей с ключами: id, text, sender, created_at, is_read
+        """
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                'SELECT * FROM messages ORDER BY id DESC LIMIT ?',
+                (limit,)
+            ).fetchall()
+            return [dict(r) for r in reversed(rows)]
         finally:
             conn.close()
 

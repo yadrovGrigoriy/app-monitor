@@ -134,6 +134,30 @@ def main():
     else:
         logger.info('SSL-сертификаты не найдены, API работает по HTTP')
 
+    # Принудительно освобождаем порт, если он занят старым процессом
+    try:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((API_HOST, API_PORT))
+        sock.close()
+    except OSError:
+        logger.warning(f'Порт {API_PORT} занят, пытаемся убить процесс...')
+        try:
+            import subprocess
+            result = subprocess.run(
+                f'netstat -ano | findstr :{API_PORT}',
+                shell=True, capture_output=True, text=True
+            )
+            for line in result.stdout.split('\n'):
+                parts = line.strip().split()
+                if len(parts) >= 5 and 'LISTENING' in line:
+                    pid = parts[-1]
+                    logger.info(f'Убиваем процесс {pid}, занявший порт {API_PORT}')
+                    subprocess.run(f'taskkill /F /PID {pid}', shell=True, capture_output=True)
+        except Exception as e:
+            logger.warning(f'Не удалось освободить порт: {e}')
+
     api_server = AppMonitorAPI(db, host=API_HOST, port=API_PORT,
                                 ssl_certfile=ssl_cert, ssl_keyfile=ssl_key)
     api_server.start()
@@ -157,7 +181,25 @@ def main():
     window._refresh_all()
     window.show()
 
-    # Фоновая проверка и автоматическое обновление (раз в 30 секунд)
+    # ─── Уведомления о новых сообщениях от администратора ──────────
+    def _on_new_admin_message(text: str, msg_id: int):
+        """Показать уведомление о новом сообщении от администратора."""
+        logger.info(f"Новое сообщение от администратора: {text[:100]}")
+        try:
+            if hasattr(window, 'tray') and window.tray and window.tray.notifier:
+                window.tray.notifier.show_info("Сообщение от администратора", text)
+            else:
+                from core.notifier import Notifier
+                Notifier().show_info("Сообщение от администратора", text)
+        except Exception as e:
+            logger.warning(f"Не удалось показать уведомление: {e}")
+
+    # Подключаем сигнал из ChatWidget (вкладка чата)
+    if hasattr(window, 'chat_widget'):
+        window.chat_widget.new_admin_message.connect(_on_new_admin_message)
+        logger.debug('Уведомления о сообщениях подключены')
+
+    # ─── Фоновая проверка и автоматическое обновление (раз в 30 секунд) ─
     def _auto_update():
         try:
             from core.updater import apply_local_update

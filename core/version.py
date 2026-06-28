@@ -34,8 +34,10 @@ def _get_version() -> str:
     4. Запасная версия (если ничего не найдено)
     """
     # 1. Рядом с exe (приоритет — сюда установщик кладёт version.txt)
+    # Используем sys.argv[0], а не sys.executable — при PyInstaller
+    # sys.executable указывает на временную _MEIxxxxx папку.
     if getattr(sys, "frozen", False):
-        exe_dir = os.path.dirname(sys.executable)
+        exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         ver = _read_version_from_file(os.path.join(exe_dir, _VERSION_FILE))
         if ver:
             return ver
