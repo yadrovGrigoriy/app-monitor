@@ -19,6 +19,7 @@ from ui.styles import global_style, tab_table_style, COLOR_DANGER, COLOR_TEXT_SE
 
 from ui.widgets.bottom_bar import BottomBar
 from ui.widgets.tracked_table import TrackedTable
+from ui.widgets.chat_widget import ChatWidget
 from ui.dialogs.auth_dialogs import AuthDialog, RegisterDialog
 from ui.dialogs.limit_dialog import AddLimitDialog, EditLimitDialog
 from ui.dialogs.stats_dialog import StatsDialog
@@ -278,6 +279,16 @@ class BaseUI(QMainWindow):
         excluded_layout.addLayout(btn_row)
 
         self.tabs.addTab(self.excluded_tab, 'Исключения')
+
+        # ── Вкладка 4: Чат (только для AppUI, у AdminUI нет БД) ────
+        _db = self.get_db()
+        if _db is not None:
+            self.chat_tab = QWidget()
+            chat_layout = QVBoxLayout(self.chat_tab)
+            chat_layout.setContentsMargins(0, 4, 0, 4)
+            self.chat_widget = ChatWidget(_db)
+            chat_layout.addWidget(self.chat_widget, stretch=1)
+            self.tabs.addTab(self.chat_tab, 'Чат')
 
         # Нижняя панель
         self.bottom_bar = BottomBar()

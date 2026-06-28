@@ -47,6 +47,7 @@ class AppMonitorAPI:
         self._start_time: Optional[float] = None
         self._server: Optional[uvicorn.Server] = None
         self._thread: Optional[threading.Thread] = None
+        self._message_counter: int = 0
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
@@ -93,25 +94,69 @@ class AppMonitorAPI:
             logger.warning(f"Папка веб-интерфейса не найдена. Искали: {candidates}")
             return
 
-        # Раздаём статику (CSS, JS)
+        # Раздаём статику (CSS, JS) — html=True для SPA-навигации
         self.app.mount("/web", StaticFiles(directory=str(web_dir), html=True), name="web")
 
-        # SPA-редирект: все не-API пути отдаём index.html
-        @self.app.get("/{full_path:path}")
-        async def serve_spa(full_path: str):
-            if full_path.startswith("api/"):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404)
+        # SPA-редирект через middleware: все не-API пути отдаём index.html
+        # Используем middleware вместо маршрута, чтобы не конфликтовать с mount
+        @self.app.middleware("http")
+        async def spa_redirect_middleware(request, call_next):
+            path = request.url.path
+            # Пропускаем API-запросы и статику
+            if path.startswith("/api/") or path.startswith("/web/"):
+                return await call_next(request)
+            # Если файл существует — отдаём как есть
+            full_path = web_dir / path.lstrip("/")
+            if full_path.is_file():
+                return await call_next(request)
+            # Всё остальное — index.html для SPA
             index_path = web_dir / "index.html"
             if index_path.is_file():
                 return FileResponse(str(index_path))
-            from fastapi import HTTPException
-            raise HTTPException(status_code=404)
+            return await call_next(request)
 
         logger.info(f"Веб-интерфейс подключён: {web_dir}")
 
     def _register_routes(self):
         app = self.app
+
+        @app.get("/api/messages/pending")
+        async def get_pending_messages():
+            """Получить непрочитанные сообщения для клиента."""
+            pending = self.db.get_pending_messages()
+            return {"messages": pending, "count": len(pending)}
+
+        @app.post("/api/message/send")
+        async def send_message_to_client(data: dict):
+            """Отправить сообщение клиенту AppMonitor."""
+            text = data.get("text", "").strip()
+            if not text:
+                raise HTTPException(status_code=400, detail="Текст сообщения не может быть пустым")
+            msg = self.db.add_message(text, "admin")
+            logger.info(f"Сообщение #{msg['id']} отправлено клиенту: {msg['text'][:50]}...")
+            return {"status": "ok", "message": msg}
+
+        @app.post("/api/messages/{message_id}/read")
+        async def mark_message_read(message_id: int):
+            """Отметить сообщение как прочитанное."""
+            self.db.mark_message_as_read(message_id)
+            return {"status": "ok"}
+
+        @app.get("/api/messages/history")
+        async def get_message_history(limit: int = 100):
+            """Получить историю сообщений."""
+            history = self.db.get_message_history(limit)
+            return {"messages": history, "count": len(history)}
+
+        @app.post("/api/messages/reply")
+        async def reply_from_client(data: dict):
+            """Отправить ответ от клиента (пользователя)."""
+            text = data.get("text", "").strip()
+            if not text:
+                raise HTTPException(status_code=400, detail="Текст сообщения не может быть пустым")
+            msg = self.db.add_message(text, "user")
+            logger.info(f"Ответ от пользователя #{msg['id']}: {msg['text'][:50]}...")
+            return {"status": "ok", "message": msg}
 
         @app.get("/api/status", response_model=StatusResponse)
         async def get_status():
@@ -507,6 +552,48 @@ class AppMonitorAPI:
             _require_auth(authorization)
             self.db.clear_data()
             return {"status": "ok", "message": "Все данные очищены"}
+
+        # ─── Логи приложения ────────────────────────────────────────
+        @app.get("/api/logs")
+        async def list_logs():
+            """Список доступных лог-файлов."""
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+            if not os.path.isdir(log_dir):
+                return {"logs": [], "count": 0}
+            files = []
+            for f in sorted(os.listdir(log_dir), reverse=True):
+                fpath = os.path.join(log_dir, f)
+                if os.path.isfile(fpath):
+                    files.append({
+                        "filename": f,
+                        "size_bytes": os.path.getsize(fpath),
+                        "modified": datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat(),
+                    })
+            return {"logs": files, "count": len(files), "log_dir": log_dir}
+
+        @app.get("/api/logs/{filename}")
+        async def read_log(filename: str, tail: int = 0):
+            """Прочитать содержимое лог-файла."""
+            safe_name = os.path.basename(filename)
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+            fpath = os.path.join(log_dir, safe_name)
+            if not os.path.isfile(fpath):
+                raise HTTPException(status_code=404, detail=f"Лог-файл '{safe_name}' не найден")
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+                total = len(lines)
+                if tail > 0:
+                    lines = lines[-tail:]
+                return {
+                    "filename": safe_name,
+                    "path": fpath,
+                    "total_lines": total,
+                    "returned_lines": len(lines),
+                    "content": "".join(lines),
+                }
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Ошибка чтения лог-файла: {e}")
 
     def start(self):
         """Запускает FastAPI-сервер в фоновом потоке."""

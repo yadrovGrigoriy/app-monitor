@@ -9,6 +9,7 @@ import {
   ClockCircleOutlined,
   BarChartOutlined,
   SettingOutlined,
+  MessageOutlined,
   LogoutOutlined,
   SafetyCertificateOutlined,
   MenuOutlined,
@@ -48,6 +49,7 @@ const navItems = [
   { key: 'apps', icon: AppstoreOutlined, label: 'Приложения', badge: () => props.appsCount },
   { key: 'limits', icon: ClockCircleOutlined, label: 'Лимиты', badge: () => props.limitsCount },
   { key: 'stats', icon: BarChartOutlined, label: 'Статистика' },
+  { key: 'messages', icon: MessageOutlined, label: 'Чат' },
   { key: 'settings', icon: SettingOutlined, label: 'Настройки' },
 ]
 </script>
@@ -108,6 +110,10 @@ const navItems = [
           <a-menu-item key="stats">
             <BarChartOutlined />
             <span>Статистика</span>
+          </a-menu-item>
+          <a-menu-item key="messages">
+            <MessageOutlined />
+            <span>Чат с пользователем</span>
           </a-menu-item>
           <a-menu-item key="settings">
             <SettingOutlined />

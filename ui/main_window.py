@@ -18,6 +18,7 @@ from ui.dialogs.limit_dialog import AddLimitDialog
 from ui.dialogs.stats_dialog import StatsDialog
 from ui.styles import global_style, tab_table_style, COLOR_DANGER
 
+
 from core.logger import setup_logger
 from core.updater import APP_VERSION
 
@@ -816,6 +817,8 @@ class MainWindow(QMainWindow):
         logger.info('Очистка ресурсов MainWindow')
         self._timer.stop()
         self._active_timer.stop()
+        if hasattr(self, 'chat_widget'):
+            self.chat_widget.cleanup()
         if hasattr(self, 'tray') and self.tray:
             self.tray.hide()
         logger.info('MainWindow очищен')

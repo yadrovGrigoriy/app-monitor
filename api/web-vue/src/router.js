@@ -4,6 +4,7 @@ import AppsPage from './views/AppsPage.vue'
 import LimitsPage from './views/LimitsPage.vue'
 import StatsPage from './views/StatsPage.vue'
 import SettingsPage from './views/SettingsPage.vue'
+import MessagesPage from './views/MessagesPage.vue'
 
 const routes = [
   { path: '/', redirect: '/dashboard' },
@@ -12,6 +13,7 @@ const routes = [
   { path: '/limits', name: 'limits', component: LimitsPage, meta: { title: 'Лимиты' } },
   { path: '/stats', name: 'stats', component: StatsPage, meta: { title: 'Статистика' } },
   { path: '/settings', name: 'settings', component: SettingsPage, meta: { title: 'Настройки' } },
+  { path: '/messages', name: 'messages', component: MessagesPage, meta: { title: 'Чат с пользователем' } },
 ]
 
 const router = createRouter({

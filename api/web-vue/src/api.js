@@ -144,6 +144,17 @@ export const api = {
     return request(`/api/logs/${encodeURIComponent(filename)}${tailParam}`)
   },
 
+  get(path) {
+    return request(path)
+  },
+
+  sendMessage(text) {
+    return request('/api/message/send', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    })
+  },
+
   uploadUpdate(file, onProgress) {
     return new Promise((resolve, reject) => {
       const formData = new FormData()

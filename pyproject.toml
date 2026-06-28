@@ -1,6 +1,6 @@
 [project]
 name = "appmonitor"
-version = "1.2.38"
+version = "1.2.60"
 description = "Монитор активности приложений для Windows"
 requires-python = ">=3.12"
 dependencies = [

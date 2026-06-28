@@ -26,6 +26,26 @@ from core.logger import setup_logger, LOG_DIR
 from core.updater import APP_VERSION
 from core.database import Database
 
+
+# ─── Сообщения для клиента ────────────────────────────────────────────
+
+# Хранилище сообщений: список словарей {id, text, created_at, read}
+_client_messages: list[dict] = []
+_message_counter: int = 0
+
+
+class SendMessageRequest(BaseModel):
+    """Запрос на отправку сообщения клиенту AppMonitor."""
+    text: str
+
+
+class MessageResponse(BaseModel):
+    """Ответ с информацией о сообщении."""
+    id: int
+    text: str
+    created_at: str
+    read: bool
+
 logger = setup_logger('api.admin_server')
 
 # ─── Конфигурация ────────────────────────────────────────────────────
@@ -344,6 +364,48 @@ def read_log(filename: str, tail: int = 0):
             status_code=500,
             detail=f"Ошибка чтения лог-файла: {e}",
         )
+
+
+# ─── Сообщения клиенту ────────────────────────────────────────────────
+
+
+@app.post("/api/message/send")
+def send_message(req: SendMessageRequest):
+    """Отправить сообщение клиенту AppMonitor.
+
+    Сообщение будет показано пользователю в трей-уведомлении.
+    """
+    global _message_counter
+    _message_counter += 1
+    msg = {
+        "id": _message_counter,
+        "text": req.text.strip(),
+        "created_at": datetime.now().isoformat(),
+        "read": False,
+    }
+    _client_messages.append(msg)
+    logger.info(f"Сообщение #{msg['id']} отправлено клиенту: {msg['text'][:50]}...")
+    return {"status": "ok", "message": msg}
+
+
+@app.get("/api/messages/pending")
+def get_pending_messages():
+    """Получить все непрочитанные сообщения для клиента.
+
+    Клиент (AppMonitor) вызывает этот эндпоинт раз в N секунд.
+    """
+    pending = [m for m in _client_messages if not m["read"]]
+    return {"messages": pending, "count": len(pending)}
+
+
+@app.post("/api/messages/{message_id}/read")
+def mark_message_read(message_id: int):
+    """Отметить сообщение как прочитанное."""
+    for m in _client_messages:
+        if m["id"] == message_id:
+            m["read"] = True
+            return {"status": "ok"}
+    raise HTTPException(status_code=404, detail=f"Сообщение #{message_id} не найдено")
 
 
 # ─── История обновлений ──────────────────────────────────────────────

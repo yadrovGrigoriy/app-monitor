@@ -1,43 +1,64 @@
+"""
+ChatWidget — виджет чата для клиента AppMonitor.
+Адаптирован под светлую тему приложения.
+"""
+
 import datetime
-import json
-import os
-import sys
-import threading
-import time
-import urllib.request
-import urllib.error
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
     QPushButton, QLabel, QScrollArea, QFrame, QSizePolicy,
-    QApplication,
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont, QColor, QPalette
+from PyQt5.QtGui import QFont
 
 from core.database import Database
 from core.logger import setup_logger
 
 logger = setup_logger('ui.chat_widget')
 
-# Цвета для сообщений
-COLOR_ADMIN_BG = "#e3f2fd"      # светло-голубой — админ
-COLOR_USER_BG = "#e8f5e9"       # светло-зелёный — пользователь
+# Цвета для светлой темы
+COLOR_ADMIN_BG = "#e3f2fd"       # светло-голубой — админ
+COLOR_USER_BG = "#e8f5e9"        # светло-зелёный — пользователь
+COLOR_OWN_MSG = "#dcf8c6"        # зелёный как в мессенджерах
 COLOR_ADMIN_LABEL = "#1565c0"
 COLOR_USER_LABEL = "#2e7d32"
-COLOR_TIME = "#757575"
-COLOR_OWN_MSG = "#dcf8c6"       # зелёный как в мессенджерах
+COLOR_TIME = "#888888"
+COLOR_BORDER = "#d0d0d0"
+COLOR_BG = "#ffffff"
+COLOR_TEXT = "#222222"
+COLOR_TEXT_SECONDARY = "#666666"
+COLOR_INPUT_BG = "#f5f5f5"
+COLOR_BTN_BG = "#4f46e5"
+COLOR_BTN_HOVER = "#4338ca"
+COLOR_BTN_PRESSED = "#3730a3"
+COLOR_BTN_DISABLED = "#a5b4fc"
+COLOR_SCROLL_BG = "#f0f0f0"
 
 
 class MessageBubble(QFrame):
-    """Виджет одного сообщения в чате."""
+    """Виджет одного сообщения в чате.
 
-    def __init__(self, text: str, sender: str, created_at: str, is_own: bool = False):
+    Свои сообщения (is_own=True) выравниваются вправо,
+    чужие (is_own=False) — влево.
+    """
+
+    def __init__(self, text: str, sender: str, created_at: str, is_own: bool = False, is_read: bool = True):
         super().__init__()
         self.setFrameShape(QFrame.StyledPanel)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        layout = QVBoxLayout(self)
+        # Внешний layout для выравнивания
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 2, 0, 2)
+
+        # Контейнер самого сообщения
+        container = QFrame()
+        container.setFrameShape(QFrame.StyledPanel)
+        container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        container.setMaximumWidth(500)
+
+        layout = QVBoxLayout(container)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(2)
 
@@ -61,6 +82,16 @@ class MessageBubble(QFrame):
         time_label.setFont(QFont('Segoe UI', 8))
         time_label.setStyleSheet(f'color: {COLOR_TIME};')
         header.addWidget(time_label)
+
+        # Статус прочтения (только для своих сообщений)
+        if is_own:
+            status_text = 'прочитано' if is_read else 'отправлено'
+            status_color = '#4caf50' if is_read else COLOR_TIME
+            status_label = QLabel(status_text)
+            status_label.setFont(QFont('Segoe UI', 8))
+            status_label.setStyleSheet(f'color: {status_color};')
+            header.addWidget(status_label)
+
         header.addStretch()
 
         layout.addLayout(header)
@@ -71,7 +102,6 @@ class MessageBubble(QFrame):
         text_label.setWordWrap(True)
         text_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         text_label.setMinimumWidth(200)
-        text_label.setMaximumWidth(500)
         layout.addWidget(text_label)
 
         # Цвет фона
@@ -81,19 +111,29 @@ class MessageBubble(QFrame):
             bg_color = COLOR_ADMIN_BG
         else:
             bg_color = COLOR_USER_BG
-        self.setStyleSheet(f"""
-            MessageBubble {{
+        container.setStyleSheet(f"""
+            QFrame {{
                 background-color: {bg_color};
                 border-radius: 8px;
-                margin: 2px 8px;
             }}
         """)
 
+        # Выравнивание: свои — справа, чужие — слева
+        if is_own:
+            outer.addStretch()
+            outer.addWidget(container)
+        else:
+            outer.addWidget(container)
+            outer.addStretch()
+
 
 class ChatWidget(QWidget):
-    """Виджет чата для клиента AppMonitor."""
+    """Виджет чата для клиента AppMonitor (светлая тема)."""
 
     POLL_INTERVAL_MS = 5000  # опрос новых сообщений каждые 5 сек
+
+    # Сигнал: новое сообщение от администратора (текст, id)
+    new_admin_message = pyqtSignal(str, int)
 
     def __init__(self, db: Database, parent=None):
         super().__init__(parent)
@@ -105,13 +145,13 @@ class ChatWidget(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setContentsMargins(0, 4, 0, 4)
         layout.setSpacing(8)
 
         # Заголовок
         title = QLabel('Чат с администратором')
         title.setFont(QFont('Segoe UI', 14, QFont.Bold))
-        title.setStyleSheet('color: #fff;')
+        title.setStyleSheet(f'color: {COLOR_TEXT};')
         layout.addWidget(title)
 
         desc = QLabel(
@@ -119,7 +159,7 @@ class ChatWidget(QWidget):
             'Вы можете отвечать на них.'
         )
         desc.setFont(QFont('Segoe UI', 10))
-        desc.setStyleSheet('color: rgba(255,255,255,.55);')
+        desc.setStyleSheet(f'color: {COLOR_TEXT_SECONDARY};')
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
@@ -127,12 +167,24 @@ class ChatWidget(QWidget):
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid rgba(255,255,255,.08);
-                border-radius: 8px;
-                background: #1a1a2e;
-            }
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: {COLOR_SCROLL_BG};
+                width: 8px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #c0c0c0;
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
         """)
 
         self.messages_container = QWidget()
@@ -151,15 +203,15 @@ class ChatWidget(QWidget):
         self.input_edit.setPlaceholderText('Напишите ответ администратору...')
         self.input_edit.setMaximumHeight(80)
         self.input_edit.setFont(QFont('Segoe UI', 10))
-        self.input_edit.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid rgba(255,255,255,.12);
+        self.input_edit.setStyleSheet(f"""
+            QTextEdit {{
+                border: 1px solid {COLOR_BORDER};
                 border-radius: 8px;
                 padding: 8px;
-                background: #16213e;
-                color: #e0e0e0;
-                selection-background-color: #6366f1;
-            }
+                background: {COLOR_INPUT_BG};
+                color: {COLOR_TEXT};
+                selection-background-color: #c7d2fe;
+            }}
         """)
         input_layout.addWidget(self.input_edit, stretch=1)
 
@@ -167,24 +219,24 @@ class ChatWidget(QWidget):
         self.send_btn.setFont(QFont('Segoe UI', 10, QFont.Bold))
         self.send_btn.setFixedHeight(40)
         self.send_btn.setFixedWidth(120)
-        self.send_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6366f1;
+        self.send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLOR_BTN_BG};
                 color: white;
                 border: none;
                 border-radius: 8px;
                 padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #4f46e5;
-            }
-            QPushButton:pressed {
-                background-color: #4338ca;
-            }
-            QPushButton:disabled {
-                background-color: #374151;
-                color: #9ca3af;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_BTN_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLOR_BTN_PRESSED};
+            }}
+            QPushButton:disabled {{
+                background-color: {COLOR_BTN_DISABLED};
+                color: #e0e0e0;
+            }}
         """)
         self.send_btn.clicked.connect(self._send_message)
         input_layout.addWidget(self.send_btn)
@@ -211,6 +263,7 @@ class ChatWidget(QWidget):
             sender=msg['sender'],
             created_at=msg['created_at'],
             is_own=is_own,
+            is_read=msg.get('is_read', True),
         )
         self.messages_layout.addWidget(bubble)
 
@@ -236,6 +289,8 @@ class ChatWidget(QWidget):
                     self._known_ids.add(msg['id'])
                     # Отмечаем как прочитанное
                     self.db.mark_message_as_read(msg['id'])
+                    # Испускаем сигнал для уведомления
+                    self.new_admin_message.emit(msg['text'], msg['id'])
             if pending:
                 self._scroll_to_bottom()
         except Exception as e:
